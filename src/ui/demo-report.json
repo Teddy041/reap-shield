@@ -1,0 +1,656 @@
+{
+  "schema": "reap-shield/report@1",
+  "tool": {
+    "name": "REAP-Shield",
+    "version": "0.1.0"
+  },
+  "scanId": "scan-2026-11-06T08-04-36-737Z-71664b11",
+  "startedAt": "2026-11-06T08:04:36.736Z",
+  "finishedAt": "2026-11-06T08:04:38.187Z",
+  "durationMs": 1451,
+  "target": {
+    "name": "demo-sample.zip",
+    "path": "C:\\Samples\\demo-sample.zip",
+    "size": 204098,
+    "kind": "zip",
+    "label": "ZIP archive",
+    "md5": "61d87f684a0a3e3c6d21b8d91c585e92",
+    "sha1": "f64db9a0e87c5a208b8780408ac9247844b2334f",
+    "sha256": "1e0a71967b4dcbefc51b5a0490f4fbddda1720e9726468eb23569bbd381ecb6b",
+    "entropy": 7.997
+  },
+  "verdict": {
+    "score": 99,
+    "level": "Critical",
+    "rawWeight": 345,
+    "criticalRules": 2,
+    "highRules": 12,
+    "summary": "The file shows behaviour strongly associated with malware. Do not run it. Key reasons: Renderer configured for remote code execution; Discord webhook URL; Path traversal entries in archive.",
+    "electronApp": true
+  },
+  "counts": {
+    "total": 26,
+    "bySeverity": {
+      "info": 4,
+      "low": 1,
+      "medium": 7,
+      "high": 12,
+      "critical": 2
+    },
+    "byCategory": {
+      "network": 4,
+      "imports": 0,
+      "fileops": 0,
+      "persistence": 2,
+      "execution": 4,
+      "obfuscation": 1,
+      "credentials": 0,
+      "evasion": 1,
+      "electron": 12,
+      "integrity": 1,
+      "archive": 1
+    }
+  },
+  "categories": {
+    "network": "Network Indicators",
+    "imports": "Suspicious Imports",
+    "fileops": "File Operations",
+    "persistence": "Persistence & Registry",
+    "execution": "Code Execution",
+    "obfuscation": "Obfuscation & Packing",
+    "credentials": "Credential & Data Theft",
+    "evasion": "Anti-Analysis & Evasion",
+    "electron": "Electron & IPC Security",
+    "integrity": "Signature & Integrity",
+    "archive": "Archive & Container"
+  },
+  "findings": [
+    {
+      "ruleId": "electron.rce-config",
+      "category": "electron",
+      "severity": "critical",
+      "title": "Renderer configured for remote code execution",
+      "description": "nodeIntegration is enabled and contextIsolation is disabled: any injected script in a window gets full operating-system access.",
+      "file": "demo-sample.zip",
+      "source": "reap-shield",
+      "evidence": [],
+      "id": "F001"
+    },
+    {
+      "ruleId": "ioc.discord-webhook",
+      "category": "network",
+      "severity": "critical",
+      "title": "Discord webhook URL",
+      "description": "Discord webhooks are the most common exfiltration channel for token and password stealers.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "https://discord.com/api/webhooks/123456789012345678/Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_…[redacted]"
+      ],
+      "occurrences": 1,
+      "id": "F002"
+    },
+    {
+      "ruleId": "archive.path-traversal",
+      "category": "archive",
+      "severity": "high",
+      "title": "Path traversal entries in archive",
+      "description": "1 entry tries to write outside the extraction folder (zip-slip). They were blocked.",
+      "file": "demo-sample.zip",
+      "source": "reap-shield",
+      "evidence": [],
+      "id": "F003"
+    },
+    {
+      "ruleId": "electron.node-integration",
+      "category": "electron",
+      "severity": "high",
+      "title": "nodeIntegration enabled",
+      "description": "Renderer pages get full Node.js access. Any XSS or remote content becomes remote code execution.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L6: w BrowserWindow({ webPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity:"
+      ],
+      "occurrences": 1,
+      "id": "F004"
+    },
+    {
+      "ruleId": "electron.context-isolation-off",
+      "category": "electron",
+      "severity": "high",
+      "title": "contextIsolation disabled",
+      "description": "Preload scripts share the JavaScript world with web content, so pages can tamper with privileged code.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L6: ebPreferences: { nodeIntegration: true, contextIsolation: false, webSecurity: false, sandbox: false },"
+      ],
+      "occurrences": 1,
+      "id": "F005"
+    },
+    {
+      "ruleId": "electron.web-security-off",
+      "category": "electron",
+      "severity": "high",
+      "title": "webSecurity disabled",
+      "description": "Same-origin policy is turned off; any page can read any origin and load local files.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L6: gration: true, contextIsolation: false, webSecurity: false, sandbox: false }, }); win.loadURL("
+      ],
+      "occurrences": 1,
+      "id": "F006"
+    },
+    {
+      "ruleId": "electron.ipc-dangerous-handler",
+      "category": "electron",
+      "severity": "high",
+      "title": "IPC handler reaches a dangerous sink",
+      "description": "An ipcMain handler body passes renderer-controlled data to shell, child_process, fs writes or eval.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L10: //updates.example-cdn.net/app.html'); } ipcMain.handle('run-command', async (event, cmd) => { exec(cmd); return true; }); ipcMain.on('open'",
+        "L11: , cmd) => { exec(cmd); return true; }); ipcMain.on('open', (event, url) => { shell.openExternal(url); }); app.whenReady().then(createWi"
+      ],
+      "occurrences": 2,
+      "id": "F007"
+    },
+    {
+      "ruleId": "electron.expose-ipc-raw",
+      "category": "electron",
+      "severity": "high",
+      "title": "Raw ipcRenderer exposed to the page",
+      "description": "exposeInMainWorld passes the ipcRenderer object (or a generic send/invoke wrapper) to web content, so any page script can call every IPC channel.",
+      "file": "demo-sample.zip!/resources/app.asar!/preload.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L5: ipcRenderer.invoke(channel, ...args), ipcRenderer: ipcRenderer, });"
+      ],
+      "occurrences": 1,
+      "id": "F008"
+    },
+    {
+      "ruleId": "electron.ipc-passthrough",
+      "category": "electron",
+      "severity": "high",
+      "title": "Unrestricted IPC channel passthrough",
+      "description": "A preload helper forwards caller-chosen channel names to ipcRenderer.invoke/send without an allow-list.",
+      "file": "demo-sample.zip!/resources/app.asar!/preload.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L4: ge.exposeInMainWorld('api', { invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args), ipcRenderer: ipcRenderer, }"
+      ],
+      "occurrences": 1,
+      "id": "F009"
+    },
+    {
+      "ruleId": "evasion.double-extension",
+      "category": "evasion",
+      "severity": "high",
+      "title": "Deceptive double file extension",
+      "description": "\"invoice.pdf.exe\" pretends to be a document but is executable.",
+      "file": "demo-sample.zip!/invoice.pdf.exe",
+      "source": "reap-shield",
+      "evidence": [],
+      "id": "F010"
+    },
+    {
+      "ruleId": "ps.hidden-bypass",
+      "category": "execution",
+      "severity": "high",
+      "title": "Hidden PowerShell with execution-policy bypass",
+      "description": "Runs PowerShell hidden and bypasses execution policy, typical in droppers.",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "L5: 4.b64decode(payload)) subprocess.Popen(\"powershell -w hidden -ep bypass -c whoami\", shell=True) key = r\"Software\\Microsoft\\Windows\\Curr"
+      ],
+      "occurrences": 1,
+      "id": "F011"
+    },
+    {
+      "ruleId": "py.decode-exec",
+      "category": "obfuscation",
+      "severity": "high",
+      "title": "Decoded or decompressed payload executed",
+      "description": "base64 / zlib / marshal / lzma decoding passed straight to exec, typical of droppers and crypters.",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "L4: rocess, winreg payload = \"aW1wb3J0IG9z\" exec(base64.b64decode(payload)) subprocess.Popen(\"po"
+      ],
+      "occurrences": 1,
+      "id": "F012"
+    },
+    {
+      "ruleId": "py.winreg-run",
+      "category": "persistence",
+      "severity": "high",
+      "title": "Registry autorun persistence (winreg)",
+      "description": "Writes values through winreg, commonly to the Run key.",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "L7: e\\Microsoft\\Windows\\CurrentVersion\\Run\" winreg.SetValueEx(None, \"Updater\", 0, winreg.REG_SZ, \"C:\\\\"
+      ],
+      "occurrences": 1,
+      "id": "F013"
+    },
+    {
+      "ruleId": "ioc.run-key",
+      "category": "persistence",
+      "severity": "high",
+      "title": "Autorun registry key",
+      "description": "Run / RunOnce / Winlogon keys start programs automatically at logon.",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+      ],
+      "occurrences": 1,
+      "id": "F014"
+    },
+    {
+      "ruleId": "electron.sandbox-off",
+      "category": "electron",
+      "severity": "medium",
+      "title": "Renderer sandbox disabled",
+      "description": "sandbox:false removes the Chromium OS-level sandbox from renderer processes.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L6: xtIsolation: false, webSecurity: false, sandbox: false }, }); win.loadURL('http://updates."
+      ],
+      "occurrences": 1,
+      "id": "F015"
+    },
+    {
+      "ruleId": "electron.open-external",
+      "category": "electron",
+      "severity": "medium",
+      "title": "shell.openExternal with a dynamic URL",
+      "description": "Opening non-constant URLs can launch arbitrary protocol handlers (file:, smb:, custom schemes).",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L11: ); ipcMain.on('open', (event, url) => { shell.openExternal(url); }); app.whenReady().then(createWindow)"
+      ],
+      "occurrences": 1,
+      "id": "F016"
+    },
+    {
+      "ruleId": "electron.insecure-load",
+      "category": "electron",
+      "severity": "medium",
+      "title": "Window loads remote content over plain HTTP",
+      "description": "loadURL over http:// allows network attackers to inject code into a privileged window.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L8: ty: false, sandbox: false }, }); win.loadURL('http://updates.example-cdn.net/app.html'); } ipcMain.handle('run-command', async"
+      ],
+      "occurrences": 1,
+      "id": "F017"
+    },
+    {
+      "ruleId": "py.exec",
+      "category": "execution",
+      "severity": "medium",
+      "title": "Dynamic code execution (exec / eval / compile)",
+      "description": "Executes strings as Python code.",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "L4: rocess, winreg payload = \"aW1wb3J0IG9z\" exec(base64.b64decode(payload)) subprocess.Po"
+      ],
+      "occurrences": 1,
+      "id": "F018"
+    },
+    {
+      "ruleId": "py.subprocess",
+      "category": "execution",
+      "severity": "medium",
+      "title": "Runs OS commands",
+      "description": "subprocess / os.system / os.popen executes shell commands.",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "L5: J0IG9z\" exec(base64.b64decode(payload)) subprocess.Popen(\"powershell -w hidden -ep bypass -c whoa"
+      ],
+      "occurrences": 1,
+      "id": "F019"
+    },
+    {
+      "ruleId": "js.child-process",
+      "category": "execution",
+      "severity": "medium",
+      "title": "Spawns OS commands (child_process)",
+      "description": "exec / spawn / execSync run shell commands from JavaScript.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L3: = require('electron'); const { exec } = require('child_process'); function createWindow() { const win"
+      ],
+      "occurrences": 1,
+      "id": "F020"
+    },
+    {
+      "ruleId": "ioc.ip-port",
+      "category": "network",
+      "severity": "medium",
+      "title": "Hard-coded public IP address with port",
+      "description": "Raw IP:port pairs are typical C2 endpoints that avoid DNS.",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "45.137.21.9:4444"
+      ],
+      "occurrences": 1,
+      "id": "F021"
+    },
+    {
+      "ruleId": "ioc.ipv4",
+      "category": "network",
+      "severity": "low",
+      "title": "Hard-coded public IPv4 address",
+      "description": "Public IP addresses embedded in the file. Many are benign (DNS resolvers, version strings).",
+      "file": "demo-sample.zip!/scripts/installer.py",
+      "source": "reap-shield",
+      "evidence": [
+        "45.137.21.9"
+      ],
+      "occurrences": 1,
+      "id": "F022"
+    },
+    {
+      "ruleId": "electron.ipc-handlers",
+      "category": "electron",
+      "severity": "info",
+      "title": "IPC handlers registered in main process",
+      "description": "ipcMain handlers define the privileged API surface. Each should validate event.senderFrame and its arguments.",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "L10: //updates.example-cdn.net/app.html'); } ipcMain.handle('run-command', async (event, cmd) => { exec(cmd); ret",
+        "L11: , cmd) => { exec(cmd); return true; }); ipcMain.on('open', (event, url) => { shell.openExternal(u"
+      ],
+      "occurrences": 2,
+      "id": "F023"
+    },
+    {
+      "ruleId": "electron.profile",
+      "category": "electron",
+      "severity": "info",
+      "title": "Electron application profile",
+      "description": "Electron application detected. 2 ipcMain handler registration(s), 0 renderer IPC call site(s), preload script present.",
+      "file": "demo-sample.zip",
+      "source": "reap-shield",
+      "evidence": [
+        "ipcMain handlers: 2",
+        "ipcRenderer calls: 0",
+        "preload: yes"
+      ],
+      "id": "F024"
+    },
+    {
+      "ruleId": "integrity.signed",
+      "category": "integrity",
+      "severity": "info",
+      "title": "Valid Authenticode signature",
+      "description": "Signature verified by Windows. Signer: CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US. Timestamped.",
+      "file": "demo-sample.zip!/payload/updater.exe",
+      "source": "reap-shield",
+      "evidence": [
+        "Issuer: CN=Microsoft Windows Production PCA 2011, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "Thumbprint: DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443"
+      ],
+      "id": "F025"
+    },
+    {
+      "ruleId": "ioc.url",
+      "category": "network",
+      "severity": "info",
+      "title": "Embedded URLs",
+      "description": "URLs referenced by the file (well-known vendor / certificate URLs are filtered out).",
+      "file": "demo-sample.zip!/resources/app.asar!/main.js",
+      "source": "reap-shield",
+      "evidence": [
+        "http://updates.example-cdn.net/app.html",
+        "https://discord.com/api/webhooks/123456789012345678/Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_Ab3_"
+      ],
+      "occurrences": 2,
+      "id": "F026"
+    }
+  ],
+  "files": [
+    {
+      "rel": "demo-sample.zip",
+      "kind": "zip",
+      "label": "ZIP archive",
+      "size": 204098,
+      "depth": 0,
+      "md5": "61d87f684a0a3e3c6d21b8d91c585e92",
+      "sha1": "f64db9a0e87c5a208b8780408ac9247844b2334f",
+      "sha256": "1e0a71967b4dcbefc51b5a0490f4fbddda1720e9726468eb23569bbd381ecb6b"
+    },
+    {
+      "rel": "demo-sample.zip!/resources/app.asar",
+      "kind": "asar",
+      "label": "Electron ASAR archive",
+      "size": 1097,
+      "depth": 1,
+      "md5": "67628a147359f72bd7c12620ac0cd2e6",
+      "sha1": "66a6620e71bcf0abbb971afa525381a087b85635",
+      "sha256": "bc61c8442fd3eda721ce3aa3810c18573f1e72c1707601b8637edf6379fad36d"
+    },
+    {
+      "rel": "demo-sample.zip!/scripts/installer.py",
+      "kind": "script",
+      "label": "Script (.py)",
+      "size": 326,
+      "depth": 1,
+      "md5": "eb1adb6416216131897ba4e93afcc151",
+      "sha1": "fad4e5f8430f9dca09e34088c87dcc00e11bd72e",
+      "sha256": "50736aa23f14d1d37c0e0d154dcf0ef9264f74dc29c15e1e4bb4dada298b156d",
+      "script": {
+        "lang": "py",
+        "lines": 9,
+        "minified": false,
+        "truncated": false
+      }
+    },
+    {
+      "rel": "demo-sample.zip!/invoice.pdf.exe",
+      "kind": "text",
+      "label": "Text file",
+      "size": 8,
+      "depth": 1,
+      "md5": "ea92569f80f6cc6d8a774c60e83e9ec9",
+      "sha1": "4527bb7687414374a54b3de2e7af99a87408ae5a",
+      "sha256": "c77db70d105714ca2d483fad8f7e95f3c44fd30b5f597a86be8667bfec068a5b",
+      "script": {
+        "lang": "other",
+        "lines": 1,
+        "minified": false,
+        "truncated": false
+      }
+    },
+    {
+      "rel": "demo-sample.zip!/payload/updater.exe",
+      "kind": "pe",
+      "label": "Windows PE executable",
+      "size": 360448,
+      "depth": 1,
+      "md5": "8a1d8175ccca97054cdb25acbb4cc07e",
+      "sha1": "76cd26b59923157e09d2bc927ba8fb059f3155dc",
+      "sha256": "468ffe129c395abf6b21a09efdf261910a95fb98aa982ead73caa7b2b684577e",
+      "pe": {
+        "valid": true,
+        "architecture": "x64",
+        "is64": true,
+        "isDll": false,
+        "isDriver": false,
+        "isDotNet": false,
+        "subsystem": "Windows GUI",
+        "compiled": "1979-02-19T18:32:04.000Z",
+        "entryPointSection": ".text",
+        "sections": [
+          {
+            "name": ".text",
+            "entropy": 6.238,
+            "rawSize": 159744,
+            "virtualSize": 157666,
+            "flags": "R-X"
+          },
+          {
+            "name": "fothk",
+            "entropy": 0.016,
+            "rawSize": 4096,
+            "virtualSize": 4096,
+            "flags": "R-X"
+          },
+          {
+            "name": ".rdata",
+            "entropy": 5.582,
+            "rawSize": 45056,
+            "virtualSize": 42696,
+            "flags": "R--"
+          },
+          {
+            "name": ".data",
+            "entropy": 1.624,
+            "rawSize": 4096,
+            "virtualSize": 10048,
+            "flags": "RW-"
+          },
+          {
+            "name": ".pdata",
+            "entropy": 3.32,
+            "rawSize": 8192,
+            "virtualSize": 4632,
+            "flags": "R--"
+          },
+          {
+            "name": ".didat",
+            "entropy": 0.252,
+            "rawSize": 4096,
+            "virtualSize": 248,
+            "flags": "RW-"
+          },
+          {
+            "name": ".rsrc",
+            "entropy": 6.968,
+            "rawSize": 126976,
+            "virtualSize": 123344,
+            "flags": "R--"
+          },
+          {
+            "name": ".reloc",
+            "entropy": 1.619,
+            "rawSize": 4096,
+            "virtualSize": 860,
+            "flags": "R--"
+          }
+        ],
+        "importedDlls": 50,
+        "importedFunctions": 315,
+        "certificatePresent": false,
+        "overlay": {
+          "present": false,
+          "offset": 0,
+          "size": 0,
+          "entropy": 0
+        },
+        "packers": [],
+        "mitigations": {
+          "highEntropyVa": true,
+          "aslr": true,
+          "forceIntegrity": false,
+          "dep": true,
+          "noSeh": false,
+          "cfg": true
+        },
+        "errors": []
+      },
+      "strings": 1525,
+      "signature": {
+        "status": "Valid",
+        "statusMessage": "Signature verified.",
+        "subject": "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "issuer": "CN=Microsoft Windows Production PCA 2011, O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+        "notAfter": "2026-10-17T22:09:15.0000000+03:00",
+        "thumbprint": "DC91E564D5BC1E3A8E02D6A8508682ABEA8A2443",
+        "timestamped": true,
+        "isOsBinary": true
+      }
+    },
+    {
+      "rel": "demo-sample.zip!/resources/app.asar!/package.json",
+      "kind": "json",
+      "label": "JSON document",
+      "size": 76,
+      "depth": 2,
+      "md5": "ccec5e0df11a28f0f6afd27eac05d703",
+      "sha1": "44e0f44b64e5f40f8717bf33df31c65dd647320e",
+      "sha256": "010952ddae99c5eb876a102f9b4ce535ff8aac2d894889bcc8c16b4373b6d42f",
+      "script": {
+        "lang": "js",
+        "lines": 1,
+        "minified": false,
+        "truncated": false
+      }
+    },
+    {
+      "rel": "demo-sample.zip!/resources/app.asar!/main.js",
+      "kind": "script",
+      "label": "Script (.js)",
+      "size": 669,
+      "depth": 2,
+      "md5": "7408833e7275d26ee72af1f0e1160f97",
+      "sha1": "8f63382b4b08c603302e5db0cf694e06572f430b",
+      "sha256": "30d709631e8d5d851d85cdf39e0e4eab6dbeeda7bdf3481bde3b63209ab17190",
+      "script": {
+        "lang": "js",
+        "lines": 14,
+        "minified": false,
+        "truncated": false
+      }
+    },
+    {
+      "rel": "demo-sample.zip!/resources/app.asar!/preload.js",
+      "kind": "script",
+      "label": "Script (.js)",
+      "size": 204,
+      "depth": 2,
+      "md5": "f8d1d95f1662482432e0e8e286556e83",
+      "sha1": "19d502d425dac1134399020ccb63b2004c939dc2",
+      "sha256": "df045b66042053d53f899601d4cfa86301170e55c2119dcebd187657d30d985c",
+      "script": {
+        "lang": "js",
+        "lines": 7,
+        "minified": false,
+        "truncated": false
+      }
+    }
+  ],
+  "archive": {
+    "extractedFiles": 7,
+    "warnings": [
+      "demo-sample.zip: Blocked path traversal attempt: ../../escape.txt"
+    ]
+  },
+  "rea": {
+    "available": false,
+    "source": "Demo mode",
+    "runs": []
+  },
+  "sandbox": {
+    "dir": "temp/sandbox/<scan-id>",
+    "kept": false
+  },
+  "errors": [],
+  "disclaimer": "Static analysis only. A low score does not guarantee a file is safe; always run unknown software in an isolated virtual machine."
+}

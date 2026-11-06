@@ -1,0 +1,16 @@
+# Dependencies and build output
+node_modules/
+dist/
+release/
+REAP-Shield.exe
+
+# Runtime sandboxes and generated samples
+temp/
+
+# Machine-specific build metadata (contains local paths)
+src/main/build-info.json
+
+# Local tooling
+.claude/
+*.log
+reap-report.*

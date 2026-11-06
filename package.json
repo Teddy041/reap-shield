@@ -1,0 +1,85 @@
+{
+  "name": "reap-shield",
+  "version": "0.1.0",
+  "description": "REAP-Shield (Reverse Engineering & Automated Privacy Shield): static threat inspection for suspicious binaries and archives, powered by REA.",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/main/main.mjs",
+  "bin": {
+    "reap-shield": "src/cli/reap-shield.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "concurrently -k -n ui,app \"vite\" \"node scripts/wait-and-launch.mjs\"",
+    "build:ui": "vite build",
+    "start": "npm run build:ui && electron .",
+    "scan": "node src/cli/reap-shield.mjs scan",
+    "demo-report": "node scripts/make-demo-report.mjs",
+    "icon": "electron scripts/make-icon.cjs",
+    "screenshots": "node scripts/make-demo-report.mjs --zip-out temp/demo/demo-sample.zip && vite build && node scripts/capture-screenshots.mjs",
+    "dist": "npm run build:ui && node scripts/write-build-info.mjs && electron-builder --win portable --x64",
+    "test": "node --test \"tests/*.test.mjs\""
+  },
+  "author": "REAP-Shield contributors",
+  "build": {
+    "appId": "io.reapshield.app",
+    "productName": "REAP-Shield",
+    "copyright": "MIT License",
+    "asar": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "package.json",
+      "src/analyzer/**",
+      "src/cli/**",
+      "src/main/**",
+      "dist/ui/**",
+      "!**/*.map"
+    ],
+    "electronVersion": "45.0.0",
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "REAP-Shield.exe"
+    },
+    "portable": {
+      "artifactName": "REAP-Shield.exe"
+    }
+  },
+  "dependencies": {
+    "7z-wasm": "1.2.0",
+    "node-unrar-js": "2.0.2",
+    "tar": "7.5.22",
+    "yauzl": "3.4.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.4",
+    "@vitejs/plugin-react": "6.2.1",
+    "concurrently": "10.0.6",
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "tailwindcss": "4.3.4",
+    "vite": "8.3.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Teddy041/reap-shield.git"
+  },
+  "homepage": "https://github.com/Teddy041/reap-shield#readme",
+  "bugs": {
+    "url": "https://github.com/Teddy041/reap-shield/issues"
+  }
+}
