@@ -1,5 +1,7 @@
 <div align="center">
 
+**English** | [简体中文](README.zh-CN.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Türkçe](README.tr.md) | [日本語](README.ja.md)
+
 <img src="build/icon.png" alt="REAP-Shield logo" width="120" />
 
 # REAP-Shield
