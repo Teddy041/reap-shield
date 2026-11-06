@@ -17,6 +17,8 @@
 
 *An open-source desktop and command-line tool that statically inspects executables, installers, archives, documents, shortcuts, scripts and Electron apps, then explains the threat in plain language, with evidence.*
 
+> 🌱 **This is an actively evolving project. Please don't hesitate to share your feedback; it helps shape REAP-Shield's future.** Open an [issue](https://github.com/Teddy041/reap-shield/issues) or start a discussion anytime.
+
 <img src="docs/screenshots/03-report.png" alt="REAP-Shield threat report" width="900" />
 
 </div>
@@ -449,6 +451,8 @@ Helper scripts:
 ---
 
 ## 🤝 Contributing
+
+**Feel free to share your feedback to help the project grow: REAP-Shield is a project in active development.** Bug reports, false-positive reports, feature ideas and questions are all welcome in [Issues](https://github.com/Teddy041/reap-shield/issues).
 
 Contributions are welcome. Detection rules are plain data in `src/analyzer/scripts.mjs`, `strings.mjs` and `apiCatalog.mjs`, which makes them a good first contribution.
 
