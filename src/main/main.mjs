@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 import { toHtml, toMarkdown } from '../analyzer/report.mjs';
 import { locateRea } from '../analyzer/rea.mjs';
 import { purgeStaleSandboxes, removeSandboxDir } from '../analyzer/sandbox.mjs';
-import { DEFAULT_SANDBOX_ROOT, maxSizeGbToBytes, MAX_SIZE_CHOICES_GB, SAFE_SIZE_RANGE_NOTE } from '../analyzer/config.mjs';
+import { DEFAULT_SANDBOX_ROOT, maxSizeGbToBytes, MAX_SIZE_CHOICES_GB, SAFE_SIZE_RANGE_NOTE, LARGE_FILE_RELIABILITY } from '../analyzer/config.mjs';
 import { TOOL } from '../analyzer/index.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -112,7 +112,7 @@ handle('app:info', () => {
     version: TOOL.version,
     platform: process.platform,
     rea: { available: rea.kind === 'node-script' || rea.kind === 'binary', kind: rea.kind, source: rea.source },
-    sizeLimit: { choicesGb: MAX_SIZE_CHOICES_GB, defaultGb: 1, note: SAFE_SIZE_RANGE_NOTE },
+    sizeLimit: { choicesGb: MAX_SIZE_CHOICES_GB, defaultGb: 1, note: SAFE_SIZE_RANGE_NOTE, reasons: LARGE_FILE_RELIABILITY },
   };
 });
 
@@ -321,8 +321,25 @@ function runCapture(win, target, outDir) {
         el.setAttribute('title', t);
       });
     })()`);
+  // Raw identifiers that must never appear in a published screenshot.
+  const sensitive = [os.homedir(), os.userInfo().username, workspace].filter((s) => s && s.length >= 3);
+  const leaksOnPage = () =>
+    js(`(() => {
+      const needles = ${JSON.stringify(sensitive.flatMap((s) => [s, s.replace(/\\/g, '\\\\'), s.replace(/\\/g, '/')]))};
+      const text = document.body.innerText + ' ' + [...document.querySelectorAll('[title]')].map((e) => e.title).join(' ');
+      return needles.filter((n) => text.includes(n));
+    })()`);
+  // Wait until the browser has painted the rewritten DOM (capturePage can otherwise race it).
+  const painted = () => js(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))`);
   const shot = async (name) => {
-    await anonymise();
+    for (let attempt = 1; ; attempt += 1) {
+      await anonymise();
+      await painted();
+      await sleep(250);
+      const leaks = await leaksOnPage();
+      if (leaks.length === 0) break;
+      if (attempt >= 3) throw new Error(`Refusing to save ${name}: local identifiers are still visible after anonymisation.`);
+    }
     const image = await win.webContents.capturePage();
     await fs.mkdir(outDir, { recursive: true });
     await fs.writeFile(path.join(outDir, name), image.toPNG());

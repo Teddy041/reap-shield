@@ -386,9 +386,14 @@ export async function scanFile(inputPath, options = {}) {
       f.description += ' (Severity lowered one level: the file carries a valid Authenticode signature.)';
       f.signedDowngrade = true;
     }
+    const coverage = assessCoverage(inventory, findings);
     const deduped = dedupe(findings);
     deduped.sort((a, b) => SEVERITIES.indexOf(b.severity) - SEVERITIES.indexOf(a.severity) || a.category.localeCompare(b.category));
     const verdict = scoreFindings(deduped.filter((f) => f.severity !== 'info'), { trustedSignature });
+    let summaryText = summarise(verdict.level, deduped);
+    if (!coverage.complete) {
+      summaryText += ` Coverage note: ${coverage.partialFiles.length} large file(s) were only partly examined, so this result is weaker evidence than usual.`;
+    }
     const root = isDir ? null : inventory[0];
     const topLevelFiles = inventory.filter((it) => it.depth === 0).length;
     const finishedAt = new Date();
@@ -409,7 +414,8 @@ export async function scanFile(inputPath, options = {}) {
         ...pickHashes(root?.hashes),
         entropy: root?.hashes?.entropy,
       },
-      verdict: { ...verdict, summary: summarise(verdict.level, deduped), electronApp },
+      verdict: { ...verdict, summary: summaryText, electronApp },
+      coverage,
       counts: countBy(deduped),
       categories: CATEGORIES,
       findings: deduped.map((f, idx) => ({ ...f, id: `F${String(idx + 1).padStart(3, '0')}` })),
@@ -439,6 +445,41 @@ export async function scanFile(inputPath, options = {}) {
 
 function mk(ruleId, category, severity, title, description, file) {
   return { ruleId, category, severity, title, description, file, source: 'reap-shield', evidence: [] };
+}
+
+/**
+ * How much of each analyzed file was actually examined. Large files are read
+ * only partially (see LIMITS), which weakens a clean result; this is recorded in
+ * the report and surfaced as findings. Also flags executables inflated with
+ * padding, a technique used to slip past size-limited scanners.
+ */
+function assessCoverage(inventory, findings) {
+  const partialFiles = [];
+  for (const it of inventory) {
+    const kind = it.type?.kind;
+    if (!kind || kind === 'empty' || isArchiveKind(kind)) continue;
+    const limit = kind === 'script' || kind === 'json' || kind === 'text' ? LIMITS.maxScriptBytes : kind === 'lnk' ? 4 * 1024 * 1024 : LIMITS.maxStringScanBytes;
+    const size = it.type.size;
+    if (size > limit) {
+      const percent = Math.max(0.1, Math.round((limit / size) * 1000) / 10);
+      partialFiles.push({ rel: it.rel, size, examinedBytes: limit, percent });
+    }
+    // Large executable that is mostly padding: whole-file entropy far below normal code.
+    if (kind === 'pe' && size > 100 * 1024 * 1024 && it.hashes && it.hashes.entropy < 1.5) {
+      findings.push({
+        ...mk('evasion.inflated-file', 'evasion', 'medium', 'Executable inflated with padding', `This ${formatBytes(size)} executable is mostly filler data (whole-file entropy ${it.hashes.entropy.toFixed(2)} bits/byte). Malware is padded like this so that size-limited scanners skip or truncate it.`, it.rel),
+        evidence: [`Size: ${formatBytes(size)}`, `Entropy: ${it.hashes.entropy.toFixed(2)}`],
+      });
+    }
+  }
+  if (partialFiles.length > 0) {
+    findings.push({
+      ...mk('coverage.partial', 'coverage', 'info', 'Large file(s) only partly examined', 'Text, IoC and script analysis reads only the beginning of very large files. Indicators stored later in these files were not examined, so a clean result here is weaker evidence. Inspect important large files in an isolated virtual machine.', partialFiles[0].rel),
+      evidence: partialFiles.slice(0, 20).map((p) => `${p.rel}: ${formatBytes(p.examinedBytes)} of ${formatBytes(p.size)} examined (${p.percent}%)`),
+      occurrences: partialFiles.length,
+    });
+  }
+  return { complete: partialFiles.length === 0, partialFiles: partialFiles.slice(0, 200) };
 }
 
 /**

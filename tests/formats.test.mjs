@@ -243,6 +243,34 @@ test('user-selected max file size: reject single files, skip them in folders', a
   assert.equal(ok.target.size, 300 * 1024);
 });
 
+test('large files: partial coverage is reported and padded executables are flagged', async (t) => {
+  // A >96 MB file is only partly searched; the report must say so.
+  const blob = path.join(dir, 'large.bin');
+  await fs.writeFile(blob, Buffer.alloc(100 * 1024 * 1024, 0x00));
+  const r = await scanFile(blob, opts());
+  assert.equal(r.coverage.complete, false);
+  assert.equal(r.coverage.partialFiles[0].percent, 96);
+  assert.ok(ids(r).has('coverage.partial'));
+  assert.match(r.verdict.summary, /only partly examined/);
+  await fs.rm(blob);
+
+  if (!fsSync.existsSync(NOTEPAD)) return t.skip('notepad.exe not available for the inflated-PE case');
+  const inflated = path.join(dir, 'setup-inflated.exe');
+  await fs.writeFile(inflated, Buffer.concat([await fs.readFile(NOTEPAD), Buffer.alloc(110 * 1024 * 1024, 0x00)]));
+  const p = await scanFile(inflated, opts());
+  assert.ok(ids(p).has('evasion.inflated-file'));
+  assert.ok(ids(p).has('coverage.partial'));
+  await fs.rm(inflated);
+});
+
+test('small files report complete coverage', async () => {
+  const p = path.join(dir, 'tiny.py');
+  await fs.writeFile(p, SUSPICIOUS_PY);
+  const r = await scanFile(p, opts());
+  assert.equal(r.coverage.complete, true);
+  assert.ok(!ids(r).has('coverage.partial'));
+});
+
 test('max size GB conversion validates the supported range', async () => {
   const { maxSizeGbToBytes, formatBytes } = await import('../src/analyzer/config.mjs');
   assert.equal(maxSizeGbToBytes(1), 1024 ** 3);

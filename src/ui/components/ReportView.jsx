@@ -230,6 +230,17 @@ export default function ReportView({ report, onReset }) {
           {trashed ? 'Moved to Recycle Bin' : `Delete ${isFolder ? 'folder' : 'file'}`}
         </button>
       </div>
+      {report.coverage && !report.coverage.complete && (
+        <div className="rounded-lg border border-sev-medium/50 bg-sev-medium/10 px-4 py-3 text-sm text-sev-medium" role="status">
+          <b>Partial coverage:</b> {report.coverage.partialFiles.length} large file(s) were only partly examined
+          {report.coverage.partialFiles[0] && (
+            <>
+              {' '}(e.g. <span className="font-mono">{report.coverage.partialFiles[0].rel.split('!/').pop()}</span>: {report.coverage.partialFiles[0].percent}% examined)
+            </>
+          )}
+          . Indicators stored later in those files were not searched, so this verdict is weaker evidence. See the <i>Scan Coverage &amp; Limits</i> finding for details.
+        </div>
+      )}
       {trashed && (
         <div className="rounded-lg border border-sev-low/50 bg-sev-low/10 px-4 py-2 text-sm text-sev-low" role="status">
           The {isFolder ? 'folder' : 'file'} was moved to the Recycle Bin. You can restore it from there if needed.

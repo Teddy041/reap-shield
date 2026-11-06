@@ -246,6 +246,20 @@ npm run dev    # Vite dev server + Electron with hot reload
 
 > **Safe range for "Max file size": 0.5 – 2 GB (1 GB recommended).** Almost all malware is under 200 MB. Higher limits work, but scans take longer, the text / IoC search covers only the first 96 MB of each file, and data extracted from archives stays capped at 2 GB (archive-bomb protection does not change with this setting).
 
+#### Why are larger files less reliable?
+
+Raising the limit lets REAP-Shield *accept* a large file, but it does not make the analysis of that file complete:
+
+| Reason | What happens |
+| --- | --- |
+| **Partial reading** | Text and IoC search reads only the first 96 MB of each file (scripts: 48 MB, PE headers: 256 MB). In a 5 GB file that is under 2% of the content; anything stored later is never examined. |
+| **REA limit** | REA inspects files up to 64 MB. Larger executables get no REA evidence. |
+| **Archive caps** | RAR / 7z archives over 384 MB are not unpacked, single extracted entries over 512 MB are skipped, and extraction stops at 2 GB in total. The inside of big containers is only partly seen. |
+| **Inflation trick** | Attackers deliberately pad malware with hundreds of MB of junk because many scanners skip or truncate large files. REAP-Shield flags executables over 100 MB that are mostly padding (`evasion.inflated-file`). |
+| **Volume caps** | Very large installers and disk images can exceed the 5,000-file and 25-REA-file budgets, so later files get less or no analysis. |
+
+When any file was only partly examined, the report says so: a **Partial coverage** banner appears, the verdict summary adds a coverage note, and a *Scan Coverage & Limits* finding lists each file with the percentage that was examined. On large files, **a Low verdict is weaker evidence**; inspect anything important in an isolated virtual machine.
+
 Opening `http://127.0.0.1:5173` in a regular browser while `npm run dev` runs shows the dashboard in **demo mode** with a bundled sample report.
 
 ---

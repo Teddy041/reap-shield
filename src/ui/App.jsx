@@ -69,6 +69,16 @@ function MaxSizeSelect({ value, onChange, sizeLimit }) {
       <p className="mt-3 text-xs text-dim">
         <span className="font-semibold text-neon">Note:</span> {cfg.note}
       </p>
+      {cfg.reasons?.length > 0 && (
+        <details className="mt-2 text-xs text-dim">
+          <summary className="cursor-pointer text-neon hover:underline">Why are larger files less reliable?</summary>
+          <ul className="mt-2 list-disc space-y-1.5 pl-5">
+            {cfg.reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       {outside && (
         <p className="mt-2 text-xs text-sev-medium" role="status">
           {value > SAFE_MAX_GB

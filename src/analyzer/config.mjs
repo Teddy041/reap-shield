@@ -98,7 +98,21 @@ export const CATEGORIES = Object.freeze({
   electron: 'Electron & IPC Security',
   integrity: 'Signature & Integrity',
   archive: 'Archive & Container',
+  coverage: 'Scan Coverage & Limits',
 });
+
+/**
+ * Why results become less reliable as files grow. Shown in the desktop app,
+ * the CLI help and the README so the explanation stays in one place.
+ */
+export const LARGE_FILE_RELIABILITY = Object.freeze([
+  'Partial reading: text and IoC search reads only the first 96 MB of each file (scripts: 48 MB, PE headers: 256 MB). In a 5 GB file that is under 2% of the content, so anything stored later is never examined.',
+  'REA limit: REA inspects files up to 64 MB; larger executables get no REA evidence.',
+  'Archive caps: RAR / 7z archives over 384 MB are not unpacked, single extracted entries over 512 MB are skipped and extraction stops at 2 GB in total, so the inside of big containers is only partly seen.',
+  'Inflation trick: attackers pad malware with hundreds of MB of junk data on purpose, because many scanners skip or truncate large files. Size itself is a common evasion technique.',
+  'Volume caps: very large installers and disk images can exceed the 5,000-file and 25-REA-file budgets, so later files get less or no analysis.',
+  'Result: on large files a Low verdict is weaker evidence. Check the report\'s Scan Coverage section and, for anything important, inspect the file in an isolated virtual machine.',
+]);
 
 export const SCRIPT_EXTENSIONS = new Set([
   '.js', '.cjs', '.mjs', '.jsx', '.ts', '.tsx', '.py', '.pyw',

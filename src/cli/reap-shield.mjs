@@ -17,7 +17,23 @@ import { scanFile, TOOL } from '../analyzer/index.mjs';
 import { toMarkdown, toHtml } from '../analyzer/report.mjs';
 import { locateRea } from '../analyzer/rea.mjs';
 import { LEVELS } from '../analyzer/scoring.mjs';
-import { maxSizeGbToBytes, SAFE_SIZE_RANGE_NOTE, MAX_SIZE_MIN_GB, MAX_SIZE_MAX_GB } from '../analyzer/config.mjs';
+import { maxSizeGbToBytes, SAFE_SIZE_RANGE_NOTE, MAX_SIZE_MIN_GB, MAX_SIZE_MAX_GB, LARGE_FILE_RELIABILITY, formatBytes } from '../analyzer/config.mjs';
+
+/** Wrap long help text to the terminal-friendly width with a hanging indent. */
+const wrap = (text, indent, width = 100) => {
+  const out = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if ((line + ' ' + word).trim().length > width - indent.length) {
+      out.push(line.trim());
+      line = '';
+    }
+    line += ` ${word}`;
+  }
+  out.push(line.trim());
+  return out.map((l) => indent + l).join('\n');
+};
+const PAD = ' '.repeat(25);
 
 const HELP = `${TOOL.name} ${TOOL.version} - Reverse Engineering & Automated Privacy Shield
 
@@ -37,7 +53,9 @@ Scan options:
       --keep-sandbox     Keep extracted files in temp/sandbox for manual review
       --max-size <GB>    Largest file to scan, ${MAX_SIZE_MIN_GB}-${MAX_SIZE_MAX_GB} GB (default 1). Larger files are rejected;
                          inside folders they are skipped.
-                         Note: ${SAFE_SIZE_RANGE_NOTE}
+${wrap(`Note: ${SAFE_SIZE_RANGE_NOTE}`, PAD)}
+${PAD}Why larger files are less reliable:
+${LARGE_FILE_RELIABILITY.map((r) => wrap(`- ${r}`, PAD)).join('\n')}
   -q, --quiet            Suppress progress output on stderr
 
 Supported inputs: folders, executables (.exe .dll .msi), archives (.zip .rar .7z .tar.* .iso .cab .asar),
