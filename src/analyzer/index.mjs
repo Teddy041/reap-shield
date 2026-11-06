@@ -13,7 +13,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { CATEGORIES, LIMITS, SEVERITIES } from './config.mjs';
+import { CATEGORIES, LIMITS, SEVERITIES, formatBytes } from './config.mjs';
 import { Sandbox, guard } from './sandbox.mjs';
 import { detectFileType, isArchiveKind } from './fileType.mjs';
 import { extractArchive, extract7z } from './extractors.mjs';
@@ -48,6 +48,7 @@ export const TOOL = { name: 'REAP-Shield', version: pkg.version };
  * @property {boolean} [keepSandbox=false] Keep extracted files for manual review.
  * @property {boolean} [verifySignature=true] Windows Authenticode verification.
  * @property {string}  [sandboxRoot]
+ * @property {number}  [maxInputBytes] Largest file accepted (default 1 GB; user-selectable).
  * @property {(e: {stage:string, message:string, percent:number}) => void} [onProgress]
  * @property {(dir: string) => void} [onSandbox] Called with the sandbox directory once created.
  */
@@ -59,6 +60,8 @@ export const TOOL = { name: 'REAP-Shield', version: pkg.version };
  */
 export async function scanFile(inputPath, options = {}) {
   const opts = { useRea: true, deep: false, keepSandbox: false, verifySignature: true, ...options };
+  /** Largest file accepted for scanning (user-selectable; see MAX_SIZE_CHOICES_GB). */
+  const maxInputBytes = Number.isFinite(opts.maxInputBytes) && opts.maxInputBytes > 0 ? opts.maxInputBytes : LIMITS.maxInputBytes;
   const progress = (stage, message, percent) => {
     try {
       opts.onProgress?.({ stage, message, percent: Math.max(0, Math.min(100, Math.round(percent))) });
@@ -78,7 +81,12 @@ export async function scanFile(inputPath, options = {}) {
   });
   const isDir = stat.isDirectory();
   if (!isDir && !stat.isFile()) throw new Error(`Unsupported item (not a file or folder): ${abs}`);
-  if (!isDir && stat.size > LIMITS.maxInputBytes) throw new Error(`File is larger than the ${LIMITS.maxInputBytes} byte limit.`);
+  if (!isDir && stat.size > maxInputBytes) {
+    throw new Error(
+      `"${path.basename(abs)}" is ${formatBytes(stat.size)}, above the current max file size of ${formatBytes(maxInputBytes)}. ` +
+        'Raise "Max file size" in the scan options (CLI: --max-size <GB>) to scan it.',
+    );
+  }
 
   const sandbox = await new Sandbox({ root: opts.sandboxRoot }).init();
   try {
@@ -99,11 +107,11 @@ export async function scanFile(inputPath, options = {}) {
     if (isDir) {
       // Folders are read in place (nothing is copied); only archives inside them are
       // extracted into the sandbox. Symlinks and junctions are never followed.
-      const walk = await walkDirectory(abs, LIMITS.maxAnalyzedFiles);
+      const walk = await walkDirectory(abs, LIMITS.maxAnalyzedFiles, maxInputBytes);
       folderBytes = walk.bytes;
       queue = walk.files.map((f) => ({ abs: f.abs, rel: `${path.basename(abs)}/${f.rel}`, depth: 0 }));
       if (walk.links) archiveWarnings.push(`${walk.links} symbolic link(s) / junction(s) were not followed.`);
-      if (walk.skippedLarge) archiveWarnings.push(`${walk.skippedLarge} file(s) larger than ${LIMITS.maxInputBytes} bytes were skipped.`);
+      if (walk.skippedLarge) archiveWarnings.push(`${walk.skippedLarge} file(s) larger than the ${formatBytes(maxInputBytes)} max file size were skipped (raise "Max file size" to include them).`);
       if (walk.truncated) archiveWarnings.push(`The folder holds more than ${LIMITS.maxAnalyzedFiles} files; only the first ${LIMITS.maxAnalyzedFiles} were analyzed.`);
       if (walk.errors.length) errors.push(...walk.errors.slice(0, 50));
       if (queue.length === 0) archiveWarnings.push('The folder contains no readable files.');
@@ -413,6 +421,7 @@ export async function scanFile(inputPath, options = {}) {
         runs: reaRuns,
       },
       sandbox: { dir: sandbox.dir, kept: opts.keepSandbox },
+      limits: { maxFileBytes: maxInputBytes },
       errors,
       disclaimer: 'Static analysis only. A low score does not guarantee a file is safe; always run unknown software in an isolated virtual machine.',
     };
@@ -436,7 +445,7 @@ function mk(ruleId, category, severity, title, description, file) {
  * List the regular files under a folder without following symlinks or
  * junctions. ".git" metadata folders are skipped.
  */
-async function walkDirectory(root, maxFiles) {
+async function walkDirectory(root, maxFiles, maxBytes) {
   const out = { files: [], bytes: 0, links: 0, skippedLarge: 0, truncated: false, errors: [] };
   const stack = [''];
   while (stack.length > 0) {
@@ -463,7 +472,7 @@ async function walkDirectory(root, maxFiles) {
         const full = path.join(root, childRel);
         const st = await fs.stat(full).catch(() => null);
         if (!st) continue;
-        if (st.size > LIMITS.maxInputBytes) {
+        if (st.size > maxBytes) {
           out.skippedLarge += 1;
           continue;
         }

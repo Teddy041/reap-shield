@@ -242,6 +242,9 @@ npm run dev    # Vite dev server + Electron with hot reload
 | REA analysis | Adds REA evidence for PE files (enabled automatically when REA is found) |
 | Deep Electron analysis | REA JavaScript application reconstruction for `.asar` files (slow) |
 | Verify signatures | Windows Authenticode verification |
+| Max file size | Largest file that will be scanned: 256 MB – 16 GB, default **1 GB**. Larger single files are rejected with a clear message; inside folders they are skipped and listed under *Warnings*. The choice is remembered. |
+
+> **Safe range for "Max file size": 0.5 – 2 GB (1 GB recommended).** Almost all malware is under 200 MB. Higher limits work, but scans take longer, the text / IoC search covers only the first 96 MB of each file, and data extracted from archives stays capped at 2 GB (archive-bomb protection does not change with this setting).
 
 Opening `http://127.0.0.1:5173` in a regular browser while `npm run dev` runs shows the dashboard in **demo mode** with a bundled sample report.
 
@@ -268,6 +271,7 @@ npx reap-shield doctor
 | `--provider` | REA native provider, e.g. `ghidra` |
 | `--no-signature` | Skip Authenticode verification |
 | `--keep-sandbox` | Keep extracted files for manual review |
+| `--max-size <GB>` | Largest file to scan, 0.05 – 16 GB (default 1). Safe range 0.5 – 2 GB. |
 | `-q, --quiet` | No progress output |
 
 **Exit codes:** `0` verdict below threshold · `1` verdict at or above `--fail-on` · `2` usage error · `3` scan failed.
@@ -333,6 +337,7 @@ Run `npx reap-shield doctor` to see what was found. REA runs on at most 25 PE fi
 
   | Limit | Value |
   | --- | --- |
+  | Size of the scanned file itself | User-selectable, default 1 GiB (safe range 0.5–2 GiB) |
   | Size of one extracted entry | 512 MiB |
   | Total extracted bytes | 2 GiB |
   | Number of entries | 20,000 |

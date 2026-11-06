@@ -218,6 +218,41 @@ test('folders are scanned in place, including archives inside them', async () =>
   assert.ok(fsSync.existsSync(path.join(folder, 'sub', 'installer.py')), 'folder contents are never modified');
 });
 
+test('user-selected max file size: reject single files, skip them in folders', async () => {
+  const folder = path.join(dir, 'size-limit');
+  await fs.mkdir(folder, { recursive: true });
+  const big = path.join(folder, 'big.bin');
+  await fs.writeFile(big, Buffer.alloc(300 * 1024, 0x41)); // 300 KB
+  await fs.writeFile(path.join(folder, 'small.py'), SUSPICIOUS_PY);
+  const limit = 200 * 1024; // 200 KB
+
+  await assert.rejects(scanFile(big, { ...opts(), maxInputBytes: limit }), (err) => {
+    assert.match(err.message, /"big\.bin" is 300 KB, above the current max file size of 200 KB/);
+    assert.match(err.message, /--max-size/);
+    return true;
+  });
+
+  const r = await scanFile(folder, { ...opts(), maxInputBytes: limit });
+  assert.ok(r.files.some((f) => f.rel.endsWith('small.py')));
+  assert.ok(!r.files.some((f) => f.rel.endsWith('big.bin')), 'oversized file skipped');
+  assert.ok(r.archive.warnings.some((w) => /1 file\(s\) larger than the 200 KB max file size were skipped/.test(w)));
+  assert.equal(r.limits.maxFileBytes, limit);
+
+  // Raising the limit makes the same file scannable.
+  const ok = await scanFile(big, { ...opts(), maxInputBytes: 1024 * 1024 });
+  assert.equal(ok.target.size, 300 * 1024);
+});
+
+test('max size GB conversion validates the supported range', async () => {
+  const { maxSizeGbToBytes, formatBytes } = await import('../src/analyzer/config.mjs');
+  assert.equal(maxSizeGbToBytes(1), 1024 ** 3);
+  assert.equal(maxSizeGbToBytes('0.5'), 512 * 1024 ** 2);
+  assert.throws(() => maxSizeGbToBytes(50), /between/);
+  assert.throws(() => maxSizeGbToBytes('abc'), /between/);
+  assert.equal(formatBytes(5.2 * 1024 ** 3), '5.2 GB');
+  assert.equal(formatBytes(1024 ** 3), '1 GB');
+});
+
 test('empty folder scans to Low without crashing', async () => {
   const empty = path.join(dir, 'empty');
   await fs.mkdir(empty);

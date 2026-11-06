@@ -17,6 +17,7 @@ import { scanFile, TOOL } from '../analyzer/index.mjs';
 import { toMarkdown, toHtml } from '../analyzer/report.mjs';
 import { locateRea } from '../analyzer/rea.mjs';
 import { LEVELS } from '../analyzer/scoring.mjs';
+import { maxSizeGbToBytes, SAFE_SIZE_RANGE_NOTE, MAX_SIZE_MIN_GB, MAX_SIZE_MAX_GB } from '../analyzer/config.mjs';
 
 const HELP = `${TOOL.name} ${TOOL.version} - Reverse Engineering & Automated Privacy Shield
 
@@ -34,6 +35,9 @@ Scan options:
       --provider <id>    REA native provider for decompilation (e.g. ghidra)
       --no-signature     Skip Windows Authenticode verification
       --keep-sandbox     Keep extracted files in temp/sandbox for manual review
+      --max-size <GB>    Largest file to scan, ${MAX_SIZE_MIN_GB}-${MAX_SIZE_MAX_GB} GB (default 1). Larger files are rejected;
+                         inside folders they are skipped.
+                         Note: ${SAFE_SIZE_RANGE_NOTE}
   -q, --quiet            Suppress progress output on stderr
 
 Supported inputs: folders, executables (.exe .dll .msi), archives (.zip .rar .7z .tar.* .iso .cab .asar),
@@ -60,6 +64,7 @@ function parseArgs(argv) {
       case '--provider': args.provider = next(); break;
       case '--no-signature': args.signature = false; break;
       case '--keep-sandbox': args.keepSandbox = true; break;
+      case '--max-size': args.maxSize = next(); break;
       case '-q': case '--quiet': args.quiet = true; break;
       default:
         if (a.startsWith('-')) throw new UsageError(`Unknown option: ${a}`);
@@ -68,6 +73,13 @@ function parseArgs(argv) {
   }
   if (!['text', 'json', 'md', 'markdown', 'html'].includes(args.format)) throw new UsageError(`Unknown format: ${args.format}`);
   if (!['low', 'medium', 'high', 'critical', 'never'].includes(args.failOn)) throw new UsageError(`Unknown --fail-on level: ${args.failOn}`);
+  if (args.maxSize !== undefined) {
+    try {
+      args.maxInputBytes = maxSizeGbToBytes(args.maxSize);
+    } catch (err) {
+      throw new UsageError(`Invalid --max-size "${args.maxSize}": ${err.message}`);
+    }
+  }
   return args;
 }
 
@@ -147,6 +159,7 @@ async function main(argv) {
       useRea: args.rea,
       deep: args.deep,
       provider: args.provider,
+      maxInputBytes: args.maxInputBytes,
       verifySignature: args.signature,
       keepSandbox: args.keepSandbox,
       onProgress: (e) => {

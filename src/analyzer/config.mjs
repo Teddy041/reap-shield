@@ -45,6 +45,36 @@ export const LIMITS = Object.freeze({
   reaDeepTimeoutMs: 600000,
 });
 
+/**
+ * User-selectable "max file size" for the scanned file itself (in GB).
+ * The default is LIMITS.maxInputBytes (1 GB). The archive-extraction budgets
+ * above stay fixed regardless of this choice: they protect against archive bombs.
+ */
+export const MAX_SIZE_CHOICES_GB = Object.freeze([0.25, 0.5, 1, 2, 4, 8, 16]);
+export const MAX_SIZE_MIN_GB = 0.05;
+export const MAX_SIZE_MAX_GB = 16;
+export const SAFE_SIZE_RANGE_NOTE =
+  'Recommended: 1 GB. Safe range: 0.5-2 GB (almost all malware is under 200 MB). ' +
+  'Larger limits work, but scans take longer, text and IoC search covers only the first 96 MB of each file, ' +
+  'and data extracted from archives stays capped at 2 GB.';
+
+/** Convert a GB value to bytes, or throw when it is outside the supported range. */
+export function maxSizeGbToBytes(gb) {
+  const n = Number(gb);
+  if (!Number.isFinite(n) || n < MAX_SIZE_MIN_GB || n > MAX_SIZE_MAX_GB) {
+    throw new Error(`Max file size must be between ${MAX_SIZE_MIN_GB} and ${MAX_SIZE_MAX_GB} GB.`);
+  }
+  return Math.round(n * 1024 * 1024 * 1024);
+}
+
+/** Human-readable size: "512 MB", "5.2 GB". */
+export function formatBytes(bytes) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(bytes % 1024 ** 3 === 0 ? 0 : 1)} GB`;
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
+}
+
 export const SEVERITIES = Object.freeze(['info', 'low', 'medium', 'high', 'critical']);
 
 export const SEVERITY_WEIGHT = Object.freeze({

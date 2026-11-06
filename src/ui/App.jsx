@@ -17,6 +17,69 @@ function Toggle({ label, hint, checked, onChange, disabled }) {
   );
 }
 
+const SIZE_KEY = 'reap.maxSizeGb';
+const DEFAULT_SIZE = { choicesGb: [0.25, 0.5, 1, 2, 4, 8, 16], defaultGb: 1, note: 'Recommended: 1 GB. Safe range: 0.5-2 GB.' };
+const SAFE_MIN_GB = 0.5;
+const SAFE_MAX_GB = 2;
+
+/** The chosen limit is a per-viewer convenience; storage may be unavailable, so fall back to 1 GB. */
+function loadMaxSize() {
+  try {
+    const v = Number(localStorage.getItem(SIZE_KEY));
+    return DEFAULT_SIZE.choicesGb.includes(v) ? v : DEFAULT_SIZE.defaultGb;
+  } catch {
+    return DEFAULT_SIZE.defaultGb;
+  }
+}
+
+function saveMaxSize(v) {
+  try {
+    localStorage.setItem(SIZE_KEY, String(v));
+  } catch {
+    /* not persisted; the choice still applies to this session */
+  }
+}
+
+const formatGb = (gb) => (gb < 1 ? `${Math.round(gb * 1024)} MB` : `${gb} GB`);
+
+function MaxSizeSelect({ value, onChange, sizeLimit }) {
+  const cfg = sizeLimit ?? DEFAULT_SIZE;
+  const outside = value < SAFE_MIN_GB || value > SAFE_MAX_GB;
+  return (
+    <div className="rounded-xl border border-edge bg-panel p-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <label htmlFor="max-size" className="text-sm">
+          Max file size
+        </label>
+        <select
+          id="max-size"
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className="rounded-lg border border-edge bg-panel-2 px-3 py-1.5 text-sm outline-none focus:border-neon"
+        >
+          {cfg.choicesGb.map((gb) => (
+            <option key={gb} value={gb}>
+              {formatGb(gb)}
+              {gb === cfg.defaultGb ? ' (recommended)' : gb >= SAFE_MIN_GB && gb <= SAFE_MAX_GB ? ' (safe range)' : ''}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-dim">Files larger than this are not scanned; in folders they are skipped.</span>
+      </div>
+      <p className="mt-3 text-xs text-dim">
+        <span className="font-semibold text-neon">Note:</span> {cfg.note}
+      </p>
+      {outside && (
+        <p className="mt-2 text-xs text-sev-medium" role="status">
+          {value > SAFE_MAX_GB
+            ? `${formatGb(value)} is above the safe range: large files take longer to hash and only their first 96 MB is searched for indicators.`
+            : `${formatGb(value)} is below the safe range: many installers and archives will be rejected as too large.`}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [info, setInfo] = useState(null);
   const [phase, setPhase] = useState('idle'); // idle | scanning | done | error
@@ -25,7 +88,7 @@ export default function App() {
   const [log, setLog] = useState([]);
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
-  const [options, setOptions] = useState({ useRea: true, deep: false, verifySignature: true });
+  const [options, setOptions] = useState(() => ({ useRea: true, deep: false, verifySignature: true, maxSizeGb: loadMaxSize() }));
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -142,6 +205,14 @@ export default function App() {
                 onChange={(v) => setOptions((o) => ({ ...o, verifySignature: v }))}
               />
             </div>
+            <MaxSizeSelect
+              value={options.maxSizeGb}
+              sizeLimit={info?.sizeLimit}
+              onChange={(v) => {
+                saveMaxSize(v);
+                setOptions((o) => ({ ...o, maxSizeGb: v }));
+              }}
+            />
             <div className="grid gap-3 text-xs text-dim sm:grid-cols-3">
               {[
                 ['Isolated sandbox', 'Archives unpack into temp/sandbox with zip-slip, symlink and bomb protection; deleted after each scan.'],

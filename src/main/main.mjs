@@ -19,7 +19,7 @@ import { createRequire } from 'node:module';
 import { toHtml, toMarkdown } from '../analyzer/report.mjs';
 import { locateRea } from '../analyzer/rea.mjs';
 import { purgeStaleSandboxes, removeSandboxDir } from '../analyzer/sandbox.mjs';
-import { DEFAULT_SANDBOX_ROOT } from '../analyzer/config.mjs';
+import { DEFAULT_SANDBOX_ROOT, maxSizeGbToBytes, MAX_SIZE_CHOICES_GB, SAFE_SIZE_RANGE_NOTE } from '../analyzer/config.mjs';
 import { TOOL } from '../analyzer/index.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -112,6 +112,7 @@ handle('app:info', () => {
     version: TOOL.version,
     platform: process.platform,
     rea: { available: rea.kind === 'node-script' || rea.kind === 'binary', kind: rea.kind, source: rea.source },
+    sizeLimit: { choicesGb: MAX_SIZE_CHOICES_GB, defaultGb: 1, note: SAFE_SIZE_RANGE_NOTE },
   };
 });
 
@@ -162,6 +163,8 @@ handle('scan:start', async (event, filePath, options = {}) => {
     useRea: options.useRea !== false,
     deep: options.deep === true,
     verifySignature: options.verifySignature !== false,
+    // Renderer input is validated here: only a number inside the supported GB range is accepted.
+    maxInputBytes: options.maxSizeGb === undefined ? undefined : maxSizeGbToBytes(options.maxSizeGb),
     provider: typeof options.provider === 'string' && /^[a-z][\w-]{0,30}$/i.test(options.provider) ? options.provider : undefined,
     sandboxRoot: SANDBOX_ROOT,
   };
