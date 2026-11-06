@@ -209,7 +209,7 @@ flowchart TD
 
 ### 方式 A：便携版 Windows 可执行文件
 
-使用 `npm run dist` 构建一次（参见[构建 Windows 可执行文件](#building)），然后运行 `REAP-Shield.exe`，无需安装。该可执行文件未进行代码签名，因此首次启动时 Windows SmartScreen 可能会显示*“未知发布者”*提示。
+使用 `npm run dist` 构建一次（参见[构建 Windows 可执行文件](#building)），然后运行 `REAP-Shield.exe`，无需安装。该可执行文件未进行代码签名，因此首次启动时 Windows SmartScreen 可能会显示“未知发布者”提示。
 
 ### 方式 B：从源码运行
 

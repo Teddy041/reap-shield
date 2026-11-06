@@ -209,7 +209,7 @@ flowchart TD
 
 ### 方法 A：ポータブル版 Windows 実行ファイル
 
-`npm run dist` で一度ビルドし（[Windows 実行ファイルのビルド](#building)を参照）、`REAP-Shield.exe` を実行します。インストールは不要です。実行ファイルはコード署名されていないため、初回起動時に Windows SmartScreen が*「不明な発行元」*の警告を表示することがあります。
+`npm run dist` で一度ビルドし（[Windows 実行ファイルのビルド](#building)を参照）、`REAP-Shield.exe` を実行します。インストールは不要です。実行ファイルはコード署名されていないため、初回起動時に Windows SmartScreen が「不明な発行元」の警告を表示することがあります。
 
 ### 方法 B：ソースコードから
 
