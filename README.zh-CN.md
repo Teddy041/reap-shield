@@ -42,6 +42,7 @@
 - [使用：桌面应用](#usage-desktop)
 - [使用：命令行与 CI/CD](#usage-cli)
 - [REA 集成](#rea)
+- [YARA 规则](#yara)
 - [威胁评分](#scoring)
 - [安全模型](#security)
 - [项目结构](#structure)
@@ -135,6 +136,7 @@
 | 🐍 **脚本** | JavaScript、Python、PowerShell、批处理和 VBA 规则。例如：解码后的 `eval`、`child_process`、obfuscator.io 混淆输出、`marshal`/`exec` 投放器、ctypes shellcode 加载器、`winreg` 持久化、浏览器密码解密。 |
 | ⚛️ **Electron 与 IPC 审计** | `nodeIntegration`、`contextIsolation:false`、`sandbox:false`、`webSecurity:false`、remote 模块、直接暴露 `ipcRenderer`、不受限制的通道转发、可触达 `exec`/`shell`/`fs` 的 IPC 处理器、`openExternal`、TLS 绕过。 |
 | 🧠 **REA 证据** | 来自 [REA](https://github.com/morluto/rea) 的权威 PE 导入表（包括延迟加载）、Authenticode 证书链、二进制加固信息和字节熵分布图。可选基于 Ghidra 的分析。 |
+| 🎯 **YARA 签名** | 每个文件（包括从容器中解出的所有内容）都会通过 [YARA-X](https://github.com/VirusTotal/yara-x)（WebAssembly）与 [YARA Forge](https://github.com/YARAHQ/yara-forge) 规则包（一键下载）以及你自己的 `.yar` 文件进行匹配。匹配结果会显示规则、描述、作者以及命中的字符串和偏移量。 |
 
 ### 桌面应用
 
@@ -261,6 +263,7 @@ npm run dev    # Vite dev server + Electron with hot reload
 | REA analysis | 为 PE 文件添加 REA 证据（检测到 REA 时自动启用） |
 | Deep Electron analysis | 针对 `.asar` 文件进行 REA JavaScript 应用重建（较慢） |
 | Verify signatures | Windows Authenticode 验证 |
+| YARA signatures | 用已安装的 YARA 规则匹配文件。**YARA rules** 面板可下载或更新 YARA Forge 规则，并打开自定义规则文件夹 |
 | Max file size | 可扫描的最大文件：256 MB – 16 GB，默认 **1 GB**。超出的单个文件会被拒绝并给出清晰提示；文件夹中的超大文件会被跳过并列在 *Warnings* 中。该选择会被记住。 |
 
 > **“Max file size”的安全范围：0.5 – 2 GB（推荐 1 GB）。** 几乎所有恶意软件都小于 200 MB。更高的上限也能用，但扫描时间更长，文本 / IoC 搜索只覆盖每个文件的前 96 MB，而且从压缩包中解出的数据仍然限制在 2 GB（压缩炸弹防护不受此设置影响）。
@@ -293,6 +296,8 @@ npx reap-shield scan ./Downloads/SomeTool --format md --output report.md
 npx reap-shield scan app.asar --format json --output report.json
 npx reap-shield scan setup.exe --fail-on medium
 npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
+npx reap-shield rules update --package core
+npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
 ```
 
@@ -305,6 +310,8 @@ npx reap-shield doctor
 | `--deep` | 针对 ASAR 文件进行 REA JavaScript 应用重建 |
 | `--provider` | REA 原生分析提供方，例如 `ghidra` |
 | `--no-signature` | 跳过 Authenticode 验证 |
+| `--no-yara` | 跳过 YARA 匹配 |
+| `--yara-rules <path>` | 本次扫描额外使用的 YARA 规则文件或文件夹（可多次指定） |
 | `--keep-sandbox` | 保留解出的文件以便人工检查 |
 | `--max-size <GB>` | 可扫描的最大文件，0.05 – 16 GB（默认 1）。安全范围 0.5 – 2 GB。 |
 | `-q, --quiet` | 不输出进度 |
@@ -354,6 +361,26 @@ npx reap-shield doctor
 
 ---
 
+<a id="yara"></a>
+## 🎯 YARA 规则
+
+REAP-Shield 使用 **[YARA-X](https://github.com/VirusTotal/yara-x)** 将每个被扫描的文件（包括从压缩包、安装程序和文档中解出的文件）与 YARA 规则进行匹配。YARA-X 是 VirusTotal 用 Rust 重写的官方 YARA 实现。它以 WebAssembly 形式运行（`@virustotal/yara-x`），因此无需本地二进制文件即可在 Windows、macOS 和 Linux 上以相同方式工作。每次匹配都会成为 *YARA Signature Matches* 类别中的一条检测结果，包含规则名称、描述、作者、命中的字符串及其偏移量，以及参考链接。
+
+由于各规则的许可证不同，**REAP-Shield 不附带任何规则。** 你可以通过两种方式添加规则：
+
+| 来源 | 方法 |
+| --- | --- |
+| **YARA Forge**（推荐） | 在应用中选择一个规则包并点击 **Download rules**；在命令行中运行 `npx reap-shield rules update`。[YARA Forge](https://github.com/YARAHQ/yara-forge) 汇集了来自众多公开仓库、经过质量筛选的规则。`core`（约 5,000 条规则）误报最少；`extended` 和 `full` 规则更多，但噪声也更多。下载的规则只有在成功编译后才会替换已安装的规则。每条规则保留其自身的许可证（参见规则的 `author`、`reference` 和 `license_url` 元数据字段）。 |
+| **你自己的规则** | 将 `.yar` / `.yara` 文件放入自定义规则文件夹（在应用中点击 **Open custom rules folder**，或运行 `npx reap-shield rules status` 查看其路径）。每个文件在各自的命名空间中编译；出错的文件会被跳过并报告，其他文件仍会正常加载。如只用于单次扫描，可通过 `--yara-rules <文件或文件夹>` 添加规则。 |
+
+规则保存在每个用户的数据文件夹中：Windows 上为 `%APPDATA%\REAP-Shield\yara`，macOS 上为 `~/Library/Application Support/REAP-Shield/yara`，Linux 上为 `~/.config/REAP-Shield/yara`（可通过 `REAP_YARA_DIR` 更改）。
+
+- **严重性：** 规则的 `severity` 元数据字段（`info` … `critical`）会被直接采用。否则会换算其 `score` 字段（YARA Forge 使用该字段）：90 及以上为 critical，75 及以上为 high，60 及以上为 medium，40 及以上为 low。两者都没有的规则视为 *medium*。private 辅助规则不会被报告，已签名文件的降级规则与其他检测结果相同。
+- **性能：** 编译 YARA Forge 的 `core` 规则包约需 3–5 秒。桌面应用只编译一次，并在规则文件变化之前于后续扫描中重复使用；CLI 每次运行编译一次。对典型的可执行文件，匹配约需 1 秒。每个文件最多读取 96 MB，每个文件的超时时间为 15 秒。
+- **误报：** 在我们对常见 Windows 系统程序和开发工具（notepad、shell32、kernel32、PowerShell、certutil、git、node）的测试中，`core` 规则包没有产生任何匹配。
+
+---
+
 <a id="scoring"></a>
 ## ⚖️ 威胁评分
 
@@ -391,7 +418,7 @@ npx reap-shield doctor
   - 禁止页面跳转和新窗口，并拒绝所有权限请求。
   - PDF 导出在禁用 JavaScript 的情况下渲染。
 - **不可信输出。** 所有报告文本在 HTML 和 Markdown 中都会被转义，React 也会转义所有界面文本。
-- **隐私。** 文件绝不会离开本机。没有遥测、没有云端查询、无需账号。
+- **隐私。** 文件绝不会离开本机。没有遥测、没有云端查询、无需账号。唯一的网络访问是可选的 YARA 规则下载，只有在点击 **Download rules** 或运行 `rules update` 时才会开始。
 
 ---
 
@@ -413,6 +440,7 @@ reap-shield/
 │   │   ├── strings.mjs          String extraction and IoC rules
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
+│   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -443,6 +471,7 @@ npm test
 - **格式：** ZIP、TAR.GZ、RAR（安装了 WinRAR 时）、7z、tar.xz、文件夹、LNK、带自动运行 JavaScript 和附件的 PDF、带模板注入的 Office VBA 投放器、SFX 附加数据、内嵌 PE 映像、JSE 和 HTML 走私。
 - **检测：** 不安全的 Electron ASAR、Python 投放器特征、MS-OVBA 解压器。
 - **报告：** 评分，以及对不可信内容的 HTML / Markdown 转义。
+- **YARA：** 带证据的自定义规则匹配、private 规则与错误规则、压缩包内的文件、分数到严重性的映射，以及 YARA Forge 更新程序（使用模拟下载）。
 
 测试文件只包含可疑的*字符串和结构*。**它们都不是可运行的恶意软件。**
 
@@ -490,7 +519,7 @@ npm run dist
 <a id="roadmap"></a>
 ## 🗺️ 路线图
 
-- [ ] 支持 YARA 规则和自定义规则包
+- [x] 支持 YARA 规则和自定义规则包
 - [ ] 可选的哈希信誉查询（需用户开启，保护隐私）
 - [ ] 解包 Inno Setup 和 MSIX
 - [ ] 通过 REA 检查 .NET IL（`inspect-il`、`inspect-managed-artifact`）

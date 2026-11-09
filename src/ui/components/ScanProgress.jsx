@@ -6,6 +6,7 @@ const STAGES = [
   ['inventory', 'Hash'],
   ['analyze', 'Analyze'],
   ['rea', 'REA'],
+  ['yara', 'YARA'],
   ['score', 'Score'],
 ];
 

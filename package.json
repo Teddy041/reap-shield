@@ -58,6 +58,7 @@
     }
   },
   "dependencies": {
+    "@virustotal/yara-x": "1.22.1",
     "7z-wasm": "1.2.0",
     "node-unrar-js": "2.0.2",
     "tar": "7.5.22",

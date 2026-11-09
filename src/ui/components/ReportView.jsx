@@ -158,6 +158,49 @@ function PePanel({ files }) {
   );
 }
 
+function YaraPanel({ yara }) {
+  if (!yara) return <div className="text-sm text-dim">This report was created before YARA support was added.</div>;
+  const active = yara.enabled && yara.ruleCount > 0;
+  return (
+    <div className="space-y-3">
+      <div className={`rounded-lg border px-4 py-3 text-sm ${active ? 'border-neon/40 text-neon' : 'border-sev-medium/40 text-sev-medium'}`}>
+        {active
+          ? `${yara.engine}: ${yara.ruleCount.toLocaleString('en-US')} rules matched against ${yara.scannedFiles} file(s), ${yara.matches} match(es) in ${yara.matchedFiles} file(s).`
+          : `${yara.engine}: ${yara.note ?? 'no rules were used.'}`}
+        {active && (
+          <span className="block text-xs text-dim">
+            Compile {yara.compileMs} ms · matching {yara.scanMs} ms{yara.timeouts ? ` · ${yara.timeouts} file(s) timed out` : ''}
+            {yara.note ? ` · ${yara.note}` : ''}
+          </span>
+        )}
+      </div>
+      {yara.sources.length > 0 && (
+        <table className="w-full text-left text-sm">
+          <thead className="text-xs uppercase tracking-wider text-dim">
+            <tr>
+              <th className="py-1 pr-3 font-normal">Rule file</th>
+              <th className="py-1 pr-3 font-normal">Source</th>
+              <th className="py-1 pr-3 font-normal">Rules</th>
+              <th className="py-1 font-normal">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {yara.sources.map((s, i) => (
+              <tr key={i} className="border-t border-edge align-top">
+                <td className="py-1.5 pr-3 font-mono text-xs">{s.name}</td>
+                <td className="py-1.5 pr-3 text-xs text-dim">{s.kind === 'forge' ? 'YARA Forge' : s.kind === 'custom' ? 'Custom folder' : 'Command line'}</td>
+                <td className="py-1.5 pr-3 font-mono text-xs">{s.rules.toLocaleString('en-US')}</td>
+                <td className={`py-1.5 text-xs ${s.ok ? 'text-sev-low' : 'text-sev-critical'}`}>{s.ok ? 'loaded' : `skipped: ${s.error}`}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {yara.matches > 0 && <div className="text-xs text-dim">Matches are listed on the Findings tab under "YARA Signature Matches".</div>}
+    </div>
+  );
+}
+
 function ReaPanel({ rea }) {
   return (
     <div className="space-y-3">
@@ -296,6 +339,7 @@ export default function ReportView({ report, onReset }) {
           ['files', 'Files', report.files.length],
           ['pe', 'PE Inspection', report.files.filter((f) => f.pe).length],
           ['rea', 'REA Evidence', report.rea.runs.length],
+          ['yara', 'YARA', report.yara?.matches ?? 0],
           ['log', 'Warnings', warnings.length],
         ]}
       />
@@ -304,6 +348,7 @@ export default function ReportView({ report, onReset }) {
       {tab === 'files' && <FileTable files={report.files} />}
       {tab === 'pe' && <PePanel files={report.files} />}
       {tab === 'rea' && <ReaPanel rea={report.rea} />}
+      {tab === 'yara' && <YaraPanel yara={report.yara} />}
       {tab === 'log' && (
         <div className="rounded-xl border border-edge bg-void p-4 font-mono text-xs text-dim">
           {warnings.length === 0 ? 'No warnings.' : warnings.map((w, i) => <div key={i} className="py-0.5">{w}</div>)}

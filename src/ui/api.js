@@ -46,6 +46,21 @@ const demo = {
     return `Downloaded demo report (${format} export needs the desktop app)`;
   },
   reveal: async () => {},
+  yaraStatus: async () => ({
+    engine: { name: 'YARA-X', version: 'demo' },
+    forge: null,
+    customFiles: 0,
+    customRules: 0,
+    packages: ['core', 'extended', 'full'],
+    note: 'Demo mode: open the desktop app to download and use YARA rules.',
+  }),
+  yaraUpdate: async () => {
+    throw new Error('Downloading rules needs the desktop app.');
+  },
+  yaraOpenCustom: async () => {
+    throw new Error('The custom rules folder is available in the desktop app.');
+  },
+  onYaraProgress: () => () => {},
   onProgress: (cb) => {
     demoListeners.add(cb);
     return () => demoListeners.delete(cb);

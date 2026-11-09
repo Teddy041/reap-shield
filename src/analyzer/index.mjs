@@ -33,6 +33,7 @@ import {
   summariseReaEntropy,
 } from './rea.mjs';
 import { verifyAuthenticodeMany } from './signature.mjs';
+import { YARA_ENGINE, loadRules, createYaraScanner, yaraMatchToFinding } from './yara.mjs';
 import { scoreFindings, summarise } from './scoring.mjs';
 
 const require = createRequire(import.meta.url);
@@ -47,6 +48,8 @@ export const TOOL = { name: 'REAP-Shield', version: pkg.version };
  * @property {string}  [provider]         REA native provider for decompilation (e.g. "ghidra").
  * @property {boolean} [keepSandbox=false] Keep extracted files for manual review.
  * @property {boolean} [verifySignature=true] Windows Authenticode verification.
+ * @property {boolean} [useYara=true]     Match files against installed YARA rules (YARA-X).
+ * @property {string[]} [yaraRules]       Extra YARA rule files or folders for this scan.
  * @property {string}  [sandboxRoot]
  * @property {number}  [maxInputBytes] Largest file accepted (default 1 GB; user-selectable).
  * @property {(e: {stage:string, message:string, percent:number}) => void} [onProgress]
@@ -59,7 +62,7 @@ export const TOOL = { name: 'REAP-Shield', version: pkg.version };
  * @param {ScanOptions} [options]
  */
 export async function scanFile(inputPath, options = {}) {
-  const opts = { useRea: true, deep: false, keepSandbox: false, verifySignature: true, ...options };
+  const opts = { useRea: true, deep: false, keepSandbox: false, verifySignature: true, useYara: true, ...options };
   /** Largest file accepted for scanning (user-selectable; see MAX_SIZE_CHOICES_GB). */
   const maxInputBytes = Number.isFinite(opts.maxInputBytes) && opts.maxInputBytes > 0 ? opts.maxInputBytes : LIMITS.maxInputBytes;
   const progress = (stage, message, percent) => {
@@ -369,6 +372,9 @@ export async function scanFile(inputPath, options = {}) {
       }
     }
 
+    // ------------------------------------------------ YARA-X signatures
+    const yara = await runYara(inventory, opts, findings, errors, progress);
+
     if (electronApp) findings.push(...electronSummaryFindings(findings, inventory, isDir ? path.basename(abs) : inventory[0]?.rel ?? ""));
 
     // ------------------------------------------------ scoring + report
@@ -426,6 +432,7 @@ export async function scanFile(inputPath, options = {}) {
         source: reaLoc.source,
         runs: reaRuns,
       },
+      yara,
       sandbox: { dir: sandbox.dir, kept: opts.keepSandbox },
       limits: { maxFileBytes: maxInputBytes },
       errors,
@@ -442,6 +449,69 @@ export async function scanFile(inputPath, options = {}) {
 }
 
 // =================================================================== helpers
+
+/**
+ * Match every inventoried file (archives included: some rules target containers)
+ * against the installed YARA rules. Returns the report's "yara" section.
+ */
+async function runYara(inventory, opts, findings, errors, progress) {
+  const section = { enabled: !!opts.useYara, engine: `${YARA_ENGINE.name} ${YARA_ENGINE.version}`, ruleCount: 0, sources: [], scannedFiles: 0, matchedFiles: 0, matches: 0, compileMs: 0, scanMs: 0, timeouts: 0, note: null };
+  if (!opts.useYara) {
+    section.note = 'YARA matching was turned off for this scan.';
+    return section;
+  }
+  progress('yara', 'YARA: compiling rules', 86);
+  let loaded;
+  try {
+    loaded = await loadRules({ extraPaths: opts.yaraRules ?? [] });
+  } catch (err) {
+    errors.push(`YARA rules could not be loaded: ${err.message}`);
+    section.note = 'YARA rules could not be loaded.';
+    return section;
+  }
+  section.sources = loaded.sources.map(({ name, kind, rules, ok, error }) => ({ name, kind, rules, ok, ...(error ? { error } : {}) }));
+  section.compileMs = loaded.compileMs;
+  section.cachedRules = loaded.cached;
+  for (const s of loaded.sources.filter((x) => !x.ok)) errors.push(`YARA rule file ${s.name} was skipped: ${s.error}`);
+  if (!loaded.rules) {
+    section.note = loaded.sources.length
+      ? 'No YARA rule file compiled successfully.'
+      : 'No YARA rules are installed. Download the YARA Forge rules in the app or run "reap-shield rules update".';
+    return section;
+  }
+  section.ruleCount = loaded.ruleCount;
+  const scanner = createYaraScanner(loaded.rules);
+  const started = Date.now();
+  let kept = 0;
+  try {
+    const items = inventory.filter((it) => it.type?.kind !== 'empty');
+    for (const [i, item] of items.entries()) {
+      if (i % 10 === 0) progress('yara', `YARA: matching ${loaded.ruleCount} rules against ${item.rel}`, 86 + (5 * i) / Math.max(1, items.length));
+      const res = await guard(`YARA matching failed for ${item.rel}`, async () => {
+        const { buf } = await readCapped(item.abs, LIMITS.maxYaraScanBytes);
+        section.scannedFiles += 1;
+        const matches = scanner.scan(buf);
+        if (matches.length) section.matchedFiles += 1;
+        section.matches += matches.length;
+        for (const m of matches) {
+          if (kept >= LIMITS.maxYaraFindings) break;
+          findings.push(yaraMatchToFinding(m, buf, item.rel));
+          kept += 1;
+        }
+      });
+      if (!res.ok) {
+        if (/timeout/i.test(res.error)) section.timeouts += 1;
+        errors.push(res.error);
+      }
+    }
+  } finally {
+    // The compiled rules stay cached in this process for the next scan.
+    scanner.free();
+  }
+  section.scanMs = Date.now() - started;
+  if (section.matches > kept) section.note = `${section.matches} rule matches; only the first ${LIMITS.maxYaraFindings} are listed as findings.`;
+  return section;
+}
 
 function mk(ruleId, category, severity, title, description, file) {
   return { ruleId, category, severity, title, description, file, source: 'reap-shield', evidence: [] };

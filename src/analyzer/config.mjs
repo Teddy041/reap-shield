@@ -43,6 +43,14 @@ export const LIMITS = Object.freeze({
   reaTimeoutMs: 120000,
   /** Timeout for the REA deep (JavaScript application) analysis. */
   reaDeepTimeoutMs: 600000,
+  /** Bytes of each file matched against YARA rules. */
+  maxYaraScanBytes: 96 * 1024 * 1024,
+  /** YARA-X timeout for one file. */
+  yaraTimeoutMs: 15000,
+  /** Matches kept per YARA pattern (evidence only; the rule result is unaffected). */
+  yaraMaxMatchesPerPattern: 5,
+  /** YARA findings kept per scan (a noisy rule set must not flood the report). */
+  maxYaraFindings: 500,
 });
 
 /**
@@ -98,6 +106,7 @@ export const CATEGORIES = Object.freeze({
   electron: 'Electron & IPC Security',
   integrity: 'Signature & Integrity',
   archive: 'Archive & Container',
+  yara: 'YARA Signature Matches',
   coverage: 'Scan Coverage & Limits',
 });
 

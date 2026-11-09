@@ -21,6 +21,7 @@ import { locateRea } from '../analyzer/rea.mjs';
 import { purgeStaleSandboxes, removeSandboxDir } from '../analyzer/sandbox.mjs';
 import { DEFAULT_SANDBOX_ROOT, maxSizeGbToBytes, MAX_SIZE_CHOICES_GB, SAFE_SIZE_RANGE_NOTE, LARGE_FILE_RELIABILITY } from '../analyzer/config.mjs';
 import { TOOL } from '../analyzer/index.mjs';
+import { yaraStatus, ensureCustomDir, FORGE_PACKAGES } from '../analyzer/yara.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** Electron's unpatched fs: sees *.asar targets as files, not virtual directories. */
@@ -116,6 +117,35 @@ handle('app:info', () => {
   };
 });
 
+handle('yara:status', () => yaraStatus());
+
+let rulesUpdate = null;
+handle('yara:update', (event, pkg) => {
+  if (!FORGE_PACKAGES.includes(pkg)) throw new Error(`Unknown YARA Forge package: ${String(pkg).slice(0, 40)}`);
+  if (rulesUpdate) throw new Error('A rule download is already running.');
+  const sender = event.sender;
+  rulesUpdate = new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./rulesWorker.mjs', import.meta.url), { workerData: { pkg } });
+    worker.on('message', (msg) => {
+      if (msg.type === 'progress' && !sender.isDestroyed()) sender.send('yara:progress', msg.message);
+      else if (msg.type === 'result') resolve(msg.info);
+      else if (msg.type === 'error') reject(new Error(msg.message));
+    });
+    worker.on('error', reject);
+    worker.on('exit', (code) => reject(new Error(`Rule download worker exited with code ${code}.`)));
+  }).finally(() => {
+    rulesUpdate = null;
+  });
+  return rulesUpdate;
+});
+
+handle('yara:openCustom', async () => {
+  const dir = await ensureCustomDir();
+  const err = await shell.openPath(dir);
+  if (err) throw new Error(`Could not open ${dir}: ${err}`);
+  return dir;
+});
+
 handle('dialog:pickFile', async () => {
   const res = await dialog.showOpenDialog(mainWindow, {
     title: 'Select a file to inspect',
@@ -163,6 +193,7 @@ handle('scan:start', async (event, filePath, options = {}) => {
     useRea: options.useRea !== false,
     deep: options.deep === true,
     verifySignature: options.verifySignature !== false,
+    useYara: options.useYara !== false,
     // Renderer input is validated here: only a number inside the supported GB range is accepted.
     maxInputBytes: options.maxSizeGb === undefined ? undefined : maxSizeGbToBytes(options.maxSizeGb),
     provider: typeof options.provider === 'string' && /^[a-z][\w-]{0,30}$/i.test(options.provider) ? options.provider : undefined,
@@ -170,12 +201,15 @@ handle('scan:start', async (event, filePath, options = {}) => {
   };
   const sender = event.sender;
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./scanWorker.mjs', import.meta.url), { workerData: { filePath, options: safeOptions } });
+    const worker = getScanWorker();
     activeScan = { worker, sandboxDir: null };
     const finish = () => {
       activeScan = null;
+      worker.off('message', onMessage);
+      worker.off('error', onError);
+      worker.off('exit', onExit);
     };
-    worker.on('message', (msg) => {
+    const onMessage = (msg) => {
       if (msg.type === 'sandbox' && activeScan) activeScan.sandboxDir = msg.dir;
       else if (msg.type === 'progress' && !sender.isDestroyed()) sender.send('scan:progress', msg.event);
       else if (msg.type === 'result') {
@@ -187,21 +221,39 @@ handle('scan:start', async (event, filePath, options = {}) => {
         finish();
         reject(new Error(msg.message));
       }
-    });
-    worker.on('error', (err) => {
+    };
+    const onError = (err) => {
       finish();
       reject(err);
-    });
-    worker.on('exit', (code) => {
-      if (activeScan?.worker === worker) {
-        const dir = activeScan.sandboxDir;
-        finish();
-        if (dir) removeSandboxDir(dir, SANDBOX_ROOT);
-        reject(new Error(code === 1 ? 'Scan cancelled.' : `Scan worker exited with code ${code}.`));
-      }
-    });
+    };
+    const onExit = (code) => {
+      const dir = activeScan?.sandboxDir;
+      finish();
+      if (dir) removeSandboxDir(dir, SANDBOX_ROOT);
+      reject(new Error(code === 1 ? 'Scan cancelled.' : `Scan worker exited with code ${code}.`));
+    };
+    worker.on('message', onMessage);
+    worker.on('error', onError);
+    worker.on('exit', onExit);
+    worker.postMessage({ type: 'scan', filePath, options: safeOptions });
   });
 });
+
+/** @type {Worker | null} Long-lived scan worker (keeps compiled YARA rules between scans). */
+let scanWorker = null;
+function getScanWorker() {
+  if (!scanWorker) {
+    const worker = new Worker(new URL('./scanWorker.mjs', import.meta.url));
+    worker.on('exit', () => {
+      if (scanWorker === worker) scanWorker = null;
+    });
+    worker.on('error', () => {
+      /* reported to the active scan; the exit handler drops the instance */
+    });
+    scanWorker = worker;
+  }
+  return scanWorker;
+}
 
 handle('scan:cancel', async () => {
   if (!activeScan) return false;
@@ -408,16 +460,24 @@ function runSmokeTest(win, target) {
         const info = await window.reap.info();
         const target = ${JSON.stringify(target)};
         let verdict = null;
+        const yara = [];
         if (target !== '1') {
-          const r = await window.reap.startScan(target, { useRea: info.rea.available });
-          verdict = r.verdict.level + ' ' + r.verdict.score + '/100, ' + r.findings.length + ' findings';
+          // Two scans: the second one must reuse the YARA rules compiled by the first.
+          for (let i = 0; i < 2; i += 1) {
+            const r = await window.reap.startScan(target, { useRea: info.rea.available });
+            verdict = r.verdict.level + ' ' + r.verdict.score + '/100, ' + r.findings.length + ' findings';
+            yara.push({ rules: r.yara.ruleCount, matches: r.yara.matches, compileMs: r.yara.compileMs, cached: r.yara.cachedRules, totalMs: r.durationMs });
+          }
         }
+        const yaraStatus = await window.reap.yaraStatus();
         return {
           rendered: document.body.innerText.includes('Inspect before you execute'),
           bridge: typeof window.reap === 'object',
           nodeIsolated: typeof require === 'undefined' && typeof process === 'undefined',
           rea: info.rea.available,
           verdict,
+          yara,
+          yaraForge: yaraStatus.forge ? yaraStatus.forge.package + ' ' + yaraStatus.forge.rules : null,
         };
       })()`);
       // REAP_SMOKE_PDF=<path> also renders the last report to PDF through the export path.
@@ -457,5 +517,6 @@ app.on('window-all-closed', async () => {
     await worker.terminate();
     if (sandboxDir) await removeSandboxDir(sandboxDir, SANDBOX_ROOT);
   }
+  await scanWorker?.terminate();
   if (process.platform !== 'darwin') app.quit();
 });

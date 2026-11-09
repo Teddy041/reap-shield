@@ -42,6 +42,7 @@
 - [Kullanım: Masaüstü Uygulaması](#usage-desktop)
 - [Kullanım: CLI ve CI/CD](#usage-cli)
 - [REA Entegrasyonu](#rea)
+- [YARA Kuralları](#yara)
 - [Tehdit Puanlaması](#scoring)
 - [Güvenlik Modeli](#security)
 - [Proje Yapısı](#structure)
@@ -135,6 +136,7 @@ Sonuçta **0–100 arası bir tehdit puanı**, **Low / Medium / High / Critical*
 | 🐍 **Betikler** | JavaScript, Python, PowerShell, batch ve VBA kuralları. Örnekler: çözülmüş `eval`, `child_process`, obfuscator.io çıktısı, `marshal`/`exec` dropper'ları, ctypes shellcode yükleyicileri, `winreg` kalıcılığı, tarayıcı parolası çözme. |
 | ⚛️ **Electron ve IPC denetimi** | `nodeIntegration`, `contextIsolation:false`, `sandbox:false`, `webSecurity:false`, remote modülü, ham `ipcRenderer`'ın açığa çıkarılması, kısıtsız kanal aktarımı, `exec`/`shell`/`fs`'e ulaşan IPC işleyicileri, `openExternal`, TLS atlatmaları. |
 | 🧠 **REA kanıtı** | [REA](https://github.com/morluto/rea)'dan yetkili PE import tabloları (gecikmeli yükleme dahil), Authenticode sertifika zincirleri, binary hardening ve bayt entropisi haritaları. İsteğe bağlı Ghidra destekli analiz. |
+| 🎯 **YARA imzaları** | Kapsayıcılardan çıkarılan her şey dahil tüm dosyalar, [YARA-X](https://github.com/VirusTotal/yara-x) (WebAssembly) ile [YARA Forge](https://github.com/YARAHQ/yara-forge) kural paketine (tek tıkla indirilir) ve sizin `.yar` dosyalarınıza karşı eşleştirilir. Eşleşmelerde kural, açıklama, yazar ve ofsetleriyle birlikte eşleşen dizeler gösterilir. |
 
 ### Masaüstü uygulaması
 
@@ -261,6 +263,7 @@ npm run dev    # Vite dev server + Electron with hot reload
 | REA analysis | PE dosyaları için REA kanıtı ekler (REA bulunduğunda otomatik açılır) |
 | Deep Electron analysis | `.asar` dosyaları için REA JavaScript uygulama yeniden yapılandırması (yavaş) |
 | Verify signatures | Windows Authenticode doğrulaması |
+| YARA signatures | Dosyaları yüklü YARA kurallarıyla eşleştirir. **YARA rules** paneli YARA Forge kurallarını indirir veya günceller ve özel kural klasörünü açar |
 | Max file size | Taranacak en büyük dosya: 256 MB – 16 GB, varsayılan **1 GB**. Daha büyük tek dosyalar anlaşılır bir mesajla reddedilir; klasörlerin içindekiler atlanır ve *Warnings* altında listelenir. Seçim hatırlanır. |
 
 > **"Max file size" için güvenli aralık: 0.5 – 2 GB (önerilen 1 GB).** Zararlı yazılımların neredeyse tamamı 200 MB'ın altındadır. Daha yüksek sınırlar çalışır, ancak taramalar uzar, metin / IoC araması her dosyanın sadece ilk 96 MB'ını kapsar ve arşivlerden çıkarılan veri 2 GB ile sınırlı kalır (arşiv bombası koruması bu ayarla değişmez).
@@ -293,6 +296,8 @@ npx reap-shield scan ./Downloads/SomeTool --format md --output report.md
 npx reap-shield scan app.asar --format json --output report.json
 npx reap-shield scan setup.exe --fail-on medium
 npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
+npx reap-shield rules update --package core
+npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
 ```
 
@@ -305,6 +310,8 @@ npx reap-shield doctor
 | `--deep` | ASAR dosyaları için REA JavaScript uygulama yeniden yapılandırması |
 | `--provider` | REA native sağlayıcısı, örn. `ghidra` |
 | `--no-signature` | Authenticode doğrulamasını atlar |
+| `--no-yara` | YARA eşleştirmesini atlar |
+| `--yara-rules <path>` | Bu tarama için ek YARA kural dosyası veya klasörü (birden çok kez verilebilir) |
 | `--keep-sandbox` | Çıkarılan dosyaları elle inceleme için saklar |
 | `--max-size <GB>` | Taranacak en büyük dosya, 0.05 – 16 GB (varsayılan 1). Güvenli aralık 0.5 – 2 GB. |
 | `-q, --quiet` | İlerleme çıktısı yok |
@@ -354,6 +361,26 @@ Neyin bulunduğunu görmek için `npx reap-shield doctor` çalıştırın. REA t
 
 ---
 
+<a id="yara"></a>
+## 🎯 YARA Kuralları
+
+REAP-Shield, arşivlerden, kurulum paketlerinden ve belgelerden çıkarılanlar dahil taranan her dosyayı, VirusTotal'ın YARA'yı Rust ile yeniden yazdığı resmî motor **[YARA-X](https://github.com/VirusTotal/yara-x)** ile YARA kurallarına karşı eşleştirir. Motor WebAssembly olarak çalışır (`@virustotal/yara-x`); bu yüzden yerel binary gerektirmeden Windows, macOS ve Linux'ta aynı şekilde çalışır. Her eşleşme, *YARA Signature Matches* kategorisinde kural adı, açıklama, yazar, ofsetleriyle eşleşen dizeler ve referans bağlantısıyla bir bulguya dönüşür.
+
+Kural lisansları farklılık gösterdiği için **REAP-Shield ile birlikte kural gelmez.** Kuralları iki yolla eklersiniz:
+
+| Kaynak | Nasıl |
+| --- | --- |
+| **YARA Forge** (önerilen) | Uygulamada bir paket seçip **Download rules** düğmesine basın; komut satırında `npx reap-shield rules update` çalıştırın. [YARA Forge](https://github.com/YARAHQ/yara-forge), birçok açık depodan kalite filtresinden geçirilmiş kuralları paketler. `core` (yaklaşık 5.000 kural) en az yanlış alarmı verir; `extended` ve `full` daha fazla kural ve daha fazla gürültü ekler. İndirilen paket, yüklü kuralların yerine ancak başarıyla derlendikten sonra geçer. Her kural kendi lisansını korur (kuralın `author`, `reference` ve `license_url` meta alanlarına bakın). |
+| **Kendi kurallarınız** | `.yar` / `.yara` dosyalarını özel kural klasörüne koyun (uygulamada **Open custom rules folder**, ya da yolunu görmek için `npx reap-shield rules status`). Her dosya kendi ad alanında derlenir; hatalı bir dosya atlanıp raporlanır, diğerleri yine yüklenir. Tek bir tarama için `--yara-rules <dosya veya klasör>` ile kural ekleyin. |
+
+Kurallar kullanıcıya özel veri klasöründe tutulur: Windows'ta `%APPDATA%\REAP-Shield\yara`, macOS'ta `~/Library/Application Support/REAP-Shield/yara`, Linux'ta `~/.config/REAP-Shield/yara` (`REAP_YARA_DIR` ile değiştirilebilir).
+
+- **Şiddet:** kuralın `severity` meta alanı (`info` … `critical`) olduğu gibi kullanılır. Yoksa `score` alanı (YARA Forge bunu kullanır) eşlenir: 90+ critical, 75+ high, 60+ medium, 40+ low. İkisi de olmayan kurallar *medium* sayılır. Private yardımcı kurallar asla raporlanmaz; imzalı dosya düşürmesi diğer bulgulardaki gibi uygulanır.
+- **Performans:** YARA Forge `core` paketinin derlenmesi yaklaşık 3–5 saniye sürer. Masaüstü uygulaması paketi bir kez derler ve bir kural dosyası değişene kadar sonraki taramalarda yeniden kullanır; CLI her çalıştırmada bir kez derler. Tipik bir exe için eşleştirme yaklaşık bir saniye sürer. Her dosyanın en fazla 96 MB'ı okunur ve dosya başına 15 saniyelik zaman aşımı uygulanır.
+- **Yanlış alarmlar:** yaygın Windows sistem ve geliştirici programları (notepad, shell32, kernel32, PowerShell, certutil, git, node) üzerindeki testlerimizde `core` paketi hiç eşleşme üretmedi.
+
+---
+
 <a id="scoring"></a>
 ## ⚖️ Tehdit Puanlaması
 
@@ -391,7 +418,7 @@ Neyin bulunduğunu görmek için `npx reap-shield doctor` çalıştırın. REA t
   - Sayfa değiştirme ve yeni pencereler engellenir, tüm izin istekleri reddedilir.
   - PDF dışa aktarma JavaScript kapalıyken render edilir.
 - **Güvenilmeyen çıktı.** Tüm rapor metinleri HTML ve Markdown'da kaçışlanır; React de tüm arayüz metinlerini kaçışlar.
-- **Gizlilik.** Dosyalar bilgisayardan asla çıkmaz. Telemetri, bulut sorgusu ve hesap yoktur.
+- **Gizlilik.** Dosyalar bilgisayardan asla çıkmaz. Telemetri, bulut sorgusu ve hesap yoktur. Tek ağ erişimi isteğe bağlı YARA kural indirmesidir ve yalnızca **Download rules** düğmesine bastığınızda veya `rules update` komutunu çalıştırdığınızda başlar.
 
 ---
 
@@ -413,6 +440,7 @@ reap-shield/
 │   │   ├── strings.mjs          String extraction and IoC rules
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
+│   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -443,6 +471,7 @@ Test paketleri tüm örnek dosyaları çalışma anında üretir ve şunları ka
 - **Formatlar:** ZIP, TAR.GZ, RAR (WinRAR kuruluysa), 7z, tar.xz, klasörler, LNK, otomatik çalışan JavaScript ve ek içeren PDF, şablon enjeksiyonlu Office VBA dropper, SFX overlay'ler, gömülü PE kalıpları, JSE ve HTML smuggling.
 - **Tespit:** güvensiz Electron ASAR, Python dropper kalıpları, MS-OVBA açıcı.
 - **Raporlama:** puanlama ve güvenilmeyen içeriğin HTML / Markdown kaçışlanması.
+- **YARA:** kanıtlı özel kural eşleşmeleri, private ve hatalı kurallar, arşiv içerikleri, puan-şiddet eşlemesi ve YARA Forge güncelleyicisi (sahte bir indirmeyle).
 
 Örnek dosyalar sadece şüpheli *metinler ve yapılar* içerir. **Hiçbiri çalışan bir zararlı yazılım değildir.**
 
@@ -490,7 +519,7 @@ Yardımcı betikler:
 <a id="roadmap"></a>
 ## 🗺️ Yol Haritası
 
-- [ ] YARA kural desteği ve özel kural paketleri
+- [x] YARA kural desteği ve özel kural paketleri
 - [ ] İsteğe bağlı hash itibar sorguları (kullanıcı açarsa, gizliliği koruyan)
 - [ ] Inno Setup ve MSIX açma
 - [ ] REA üzerinden .NET IL incelemesi (`inspect-il`, `inspect-managed-artifact`)

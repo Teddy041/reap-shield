@@ -3,6 +3,7 @@ import { api } from './api.js';
 import DropZone from './components/DropZone.jsx';
 import ScanProgress from './components/ScanProgress.jsx';
 import ReportView from './components/ReportView.jsx';
+import YaraRules from './components/YaraRules.jsx';
 
 function Toggle({ label, hint, checked, onChange, disabled }) {
   return (
@@ -98,11 +99,13 @@ export default function App() {
   const [log, setLog] = useState([]);
   const [report, setReport] = useState(null);
   const [error, setError] = useState('');
-  const [options, setOptions] = useState(() => ({ useRea: true, deep: false, verifySignature: true, maxSizeGb: loadMaxSize() }));
+  const [options, setOptions] = useState(() => ({ useRea: true, deep: false, verifySignature: true, useYara: true, maxSizeGb: loadMaxSize() }));
+  const [yara, setYara] = useState(null);
   const cancelled = useRef(false);
 
   useEffect(() => {
     api.info().then(setInfo).catch(() => {});
+    api.yaraStatus?.().then(setYara).catch(() => {});
     return api.onProgress((e) => {
       setProgress(e);
       setLog((l) => [...l.slice(-400), { ...e, time: new Date().toLocaleTimeString('en-GB') }]);
@@ -148,6 +151,7 @@ export default function App() {
   };
 
   const reaOk = info?.rea?.available;
+  const yaraRules = (yara?.forge?.rules ?? 0) + (yara?.customRules ?? 0);
 
   return (
     <div className="cyber-grid min-h-full">
@@ -192,7 +196,7 @@ export default function App() {
                 <b>Scan failed:</b> {error}
               </div>
             )}
-            <div className="grid gap-4 rounded-xl border border-edge bg-panel p-5 sm:grid-cols-3">
+            <div className="grid gap-4 rounded-xl border border-edge bg-panel p-5 sm:grid-cols-2">
               <Toggle
                 label="REA analysis"
                 hint={reaOk ? 'PE imports, certificates, hardening, entropy' : 'REA not found: built-in analyzers only'}
@@ -214,7 +218,14 @@ export default function App() {
                 disabled={info?.platform !== 'win32'}
                 onChange={(v) => setOptions((o) => ({ ...o, verifySignature: v }))}
               />
+              <Toggle
+                label="YARA signatures"
+                hint={yaraRules ? `${yaraRules.toLocaleString('en-US')} rules (YARA-X)` : 'No rules installed yet: download them below'}
+                checked={options.useYara}
+                onChange={(v) => setOptions((o) => ({ ...o, useYara: v }))}
+              />
             </div>
+            <YaraRules status={yara} onStatus={setYara} />
             <MaxSizeSelect
               value={options.maxSizeGb}
               sizeLimit={info?.sizeLimit}

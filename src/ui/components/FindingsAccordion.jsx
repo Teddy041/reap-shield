@@ -27,6 +27,8 @@ const ICONS = {
   electron: '⚛',
   integrity: '✓',
   archive: '▣',
+  yara: '⌕',
+  coverage: '◫',
 };
 
 export function SeverityBadge({ severity }) {

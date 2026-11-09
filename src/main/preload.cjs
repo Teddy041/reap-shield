@@ -21,6 +21,14 @@ contextBridge.exposeInMainWorld('reap', {
   cancelScan: () => ipcRenderer.invoke('scan:cancel'),
   exportReport: (scanId, format) => ipcRenderer.invoke('report:export', scanId, format),
   reveal: (filePath) => ipcRenderer.invoke('shell:reveal', filePath),
+  yaraStatus: () => ipcRenderer.invoke('yara:status'),
+  yaraUpdate: (pkg) => ipcRenderer.invoke('yara:update', pkg),
+  yaraOpenCustom: () => ipcRenderer.invoke('yara:openCustom'),
+  onYaraProgress: (callback) => {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on('yara:progress', listener);
+    return () => ipcRenderer.removeListener('yara:progress', listener);
+  },
   /** Main-initiated scan (screenshot capture mode only). */
   onAutoScan: (callback) => {
     const listener = (_event, filePath) => callback(filePath);

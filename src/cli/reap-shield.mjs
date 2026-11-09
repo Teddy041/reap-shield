@@ -4,6 +4,7 @@
  *
  *   reap-shield scan <file|folder> [options]
  *   reap-shield doctor
+ *   reap-shield rules status | update [--package core|extended|full]
  *
  * Exit codes (for CI/CD gates):
  *   0  scan finished and the verdict is below --fail-on
@@ -17,6 +18,7 @@ import { scanFile, TOOL } from '../analyzer/index.mjs';
 import { toMarkdown, toHtml } from '../analyzer/report.mjs';
 import { locateRea } from '../analyzer/rea.mjs';
 import { LEVELS } from '../analyzer/scoring.mjs';
+import { yaraStatus, updateForgeRules, ensureCustomDir, FORGE_PACKAGES, FORGE_DEFAULT_PACKAGE, FORGE_HOME, FORGE_NOTE } from '../analyzer/yara.mjs';
 import { maxSizeGbToBytes, SAFE_SIZE_RANGE_NOTE, MAX_SIZE_MIN_GB, MAX_SIZE_MAX_GB, LARGE_FILE_RELIABILITY, formatBytes } from '../analyzer/config.mjs';
 
 /** Wrap long help text to the terminal-friendly width with a hanging indent. */
@@ -40,6 +42,8 @@ const HELP = `${TOOL.name} ${TOOL.version} - Reverse Engineering & Automated Pri
 Usage:
   reap-shield scan <file|folder> [options]
   reap-shield doctor
+  reap-shield rules status
+  reap-shield rules update [--package ${FORGE_PACKAGES.join('|')}]
   reap-shield --help | --version
 
 Scan options:
@@ -50,6 +54,9 @@ Scan options:
       --deep             Run heavy REA workflows (JavaScript application reconstruction)
       --provider <id>    REA native provider for decompilation (e.g. ghidra)
       --no-signature     Skip Windows Authenticode verification
+      --no-yara          Do not match files against YARA rules
+      --yara-rules <path>
+                         Extra YARA rule file or folder for this scan (repeatable)
       --keep-sandbox     Keep extracted files in temp/sandbox for manual review
       --max-size <GB>    Largest file to scan, ${MAX_SIZE_MIN_GB}-${MAX_SIZE_MAX_GB} GB (default 1). Larger files are rejected;
                          inside folders they are skipped.
@@ -58,12 +65,15 @@ ${PAD}Why larger files are less reliable:
 ${LARGE_FILE_RELIABILITY.map((r) => wrap(`- ${r}`, PAD)).join('\n')}
   -q, --quiet            Suppress progress output on stderr
 
+YARA rules (YARA-X engine):
+${wrap(`"rules update" downloads the latest YARA Forge package (${FORGE_HOME}, default "${FORGE_DEFAULT_PACKAGE}") into the per-user data folder; your own *.yar files go in the custom folder shown by "rules status". ${FORGE_NOTE}`, '  ')}
+
 Supported inputs: folders, executables (.exe .dll .msi), archives (.zip .rar .7z .tar.* .iso .cab .asar),
 documents (.pdf .docm .xlsm .lnk) and scripts (.js .py .ps1 .vbs .hta) - see README for the full list.
 Nothing is ever executed: all analysis is static.`;
 
 function parseArgs(argv) {
-  const args = { _: [], format: 'text', failOn: 'high', rea: true, deep: false, signature: true, keepSandbox: false, quiet: false };
+  const args = { _: [], format: 'text', failOn: 'high', rea: true, deep: false, signature: true, yara: true, yaraRules: [], keepSandbox: false, quiet: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const next = () => {
@@ -81,6 +91,9 @@ function parseArgs(argv) {
       case '--deep': args.deep = true; break;
       case '--provider': args.provider = next(); break;
       case '--no-signature': args.signature = false; break;
+      case '--no-yara': args.yara = false; break;
+      case '--yara-rules': args.yaraRules.push(next()); break;
+      case '--package': args.package = next().toLowerCase(); break;
       case '--keep-sandbox': args.keepSandbox = true; break;
       case '--max-size': args.maxSize = next(); break;
       case '-q': case '--quiet': args.quiet = true; break;
@@ -117,6 +130,10 @@ function toText(r) {
   if (r.target.md5) out.push(`MD5      ${r.target.md5}`);
   out.push(`Files    ${r.files.length} analyzed${r.verdict.electronApp ? ' · Electron application' : ''}`);
   out.push(`REA      ${r.rea.available ? c('32', 'active') : c('33', 'unavailable')} (${r.rea.source})`);
+  if (r.yara) {
+    const y = r.yara;
+    out.push(`YARA     ${y.ruleCount ? c('32', `${y.ruleCount.toLocaleString('en-US')} rules`) + ` · ${y.matches} match(es) in ${y.scannedFiles} file(s)` : c('33', 'no rules loaded')}${y.note ? c('90', ` (${y.note})`) : ''}`);
+  }
   out.push('');
   out.push(`Verdict  ${c(LEVEL_STYLE[r.verdict.level], `${r.verdict.level.toUpperCase()}  ${r.verdict.score}/100`)}`);
   out.push(`         ${r.verdict.summary}`);
@@ -143,8 +160,43 @@ async function doctor() {
     `REA         ${loc.kind === 'node-script' || loc.kind === 'binary' ? 'found' : loc.kind} - ${loc.source}`,
     `Authenticode ${process.platform === 'win32' ? 'available (Get-AuthenticodeSignature)' : 'not available on this platform'}`,
   ];
+  const y = await yaraStatus();
+  lines.push(`YARA        ${y.engine.name} ${y.engine.version} - ${y.forge ? `YARA Forge ${y.forge.package} (${y.forge.created}, ${y.forge.rules} rules)` : 'no YARA Forge rules (run "reap-shield rules update")'}, ${y.customRules} custom rule(s)`);
   process.stdout.write(`${lines.join('\n')}\n`);
   return 0;
+}
+
+async function rules(sub, args) {
+  if (sub === 'update') {
+    const pkg = args.package ?? FORGE_DEFAULT_PACKAGE;
+    if (!FORGE_PACKAGES.includes(pkg)) {
+      process.stderr.write(`Error: --package must be one of ${FORGE_PACKAGES.join(', ')}.\n`);
+      return 2;
+    }
+    try {
+      const info = await updateForgeRules({ pkg, onProgress: (m) => !args.quiet && process.stderr.write(`${m}...\n`) });
+      process.stdout.write(`Installed YARA Forge "${info.package}" (${info.created}): ${info.rules} rules\nSHA-256 ${info.sha256}\n`);
+      return 0;
+    } catch (err) {
+      process.stderr.write(`Rule update failed: ${err.message}\n`);
+      return 3;
+    }
+  }
+  if (sub === 'status' || sub === undefined) {
+    const custom = await ensureCustomDir();
+    const y = await yaraStatus();
+    const lines = [
+      `Engine        ${y.engine.name} ${y.engine.version}`,
+      `YARA Forge    ${y.forge ? `"${y.forge.package}" from ${y.forge.created}, ${y.forge.rules} rules (downloaded ${y.forge.downloadedAt})` : 'not installed - run "reap-shield rules update"'}`,
+      `Custom rules  ${y.customRules} rule(s) in ${y.customFiles} file(s)`,
+      `Rule folders  ${y.dirs.forge}`,
+      `              ${custom}`,
+    ];
+    process.stdout.write(`${lines.join('\n')}\n`);
+    return 0;
+  }
+  process.stderr.write(`Error: expected "rules status" or "rules update".\n`);
+  return 2;
 }
 
 async function main(argv) {
@@ -165,8 +217,9 @@ async function main(argv) {
     return args.help ? 0 : 2;
   }
   if (command === 'doctor') return doctor();
+  if (command === 'rules') return rules(target, args);
   if (command !== 'scan' || !target) {
-    process.stderr.write(`Error: expected "scan <file>" or "doctor".\n\n${HELP}\n`);
+    process.stderr.write(`Error: expected "scan <file>", "rules" or "doctor".\n\n${HELP}\n`);
     return 2;
   }
 
@@ -179,6 +232,8 @@ async function main(argv) {
       provider: args.provider,
       maxInputBytes: args.maxInputBytes,
       verifySignature: args.signature,
+      useYara: args.yara,
+      yaraRules: args.yaraRules,
       keepSandbox: args.keepSandbox,
       onProgress: (e) => {
         if (showProgress) process.stderr.write(`\r\x1b[2K[${String(e.percent).padStart(3)}%] ${e.message.slice(0, 100)}`);

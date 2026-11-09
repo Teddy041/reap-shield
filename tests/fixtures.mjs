@@ -4,9 +4,14 @@
  * the webhook are random placeholders.
  */
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import * as tar from 'tar';
+
+// Keep tests independent of the YARA rules installed on this machine: every test
+// process gets its own (empty unless a test fills it) rule folder.
+if (!process.env.REAP_YARA_DIR) process.env.REAP_YARA_DIR = path.join(os.tmpdir(), `reap-yara-test-${process.pid}`);
 
 const FAKE_WEBHOOK = `https://discord.com/api/webhooks/123456789012345678/${'Ab3_'.repeat(17)}`;
 

@@ -42,6 +42,7 @@
 - [使い方：デスクトップアプリ](#usage-desktop)
 - [使い方：CLI と CI/CD](#usage-cli)
 - [REA との連携](#rea)
+- [YARA ルール](#yara)
 - [脅威スコア](#scoring)
 - [セキュリティモデル](#security)
 - [プロジェクト構成](#structure)
@@ -135,6 +136,7 @@
 | 🐍 **スクリプト** | JavaScript、Python、PowerShell、バッチ、VBA のルール。例：デコード後の `eval`、`child_process`、obfuscator.io の出力、`marshal`/`exec` ドロッパー、ctypes によるシェルコードローダー、`winreg` による永続化、ブラウザーパスワードの復号。 |
 | ⚛️ **Electron と IPC の監査** | `nodeIntegration`、`contextIsolation:false`、`sandbox:false`、`webSecurity:false`、remote モジュール、`ipcRenderer` の直接公開、無制限のチャネル転送、`exec`/`shell`/`fs` に到達する IPC ハンドラー、`openExternal`、TLS 検証の回避。 |
 | 🧠 **REA の根拠** | [REA](https://github.com/morluto/rea) による信頼性の高い PE インポートテーブル（遅延ロードを含む）、Authenticode 証明書チェーン、バイナリのハードニング、バイトエントロピーマップ。Ghidra を使った解析もオプションで利用できます。 |
+| 🎯 **YARA シグネチャ** | コンテナから展開されたものを含むすべてのファイルを、[YARA-X](https://github.com/VirusTotal/yara-x)（WebAssembly）で [YARA Forge](https://github.com/YARAHQ/yara-forge) のルールパッケージ（ワンクリックでダウンロード）と独自の `.yar` ファイルに照合します。一致した場合は、ルール、説明、作成者、一致した文字列とそのオフセットを表示します。 |
 
 ### デスクトップアプリ
 
@@ -261,6 +263,7 @@ npm run dev    # Vite dev server + Electron with hot reload
 | REA analysis | PE ファイルに REA の根拠を追加（REA が見つかると自動で有効） |
 | Deep Electron analysis | `.asar` ファイルに対する REA の JavaScript アプリ再構築（低速） |
 | Verify signatures | Windows Authenticode による検証 |
+| YARA signatures | インストール済みの YARA ルールでファイルを照合します。**YARA rules** パネルから YARA Forge のダウンロード・更新と、カスタムルールフォルダーを開く操作ができます |
 | Max file size | スキャン対象の最大ファイルサイズ：256 MB〜16 GB、既定値 **1 GB**。これを超える単体ファイルはわかりやすいメッセージとともに拒否され、フォルダー内の該当ファイルはスキップされて *Warnings* に一覧表示されます。選択内容は記憶されます。 |
 
 > **「Max file size」の安全な範囲：0.5〜2 GB（推奨 1 GB）。** マルウェアのほぼすべては 200 MB 未満です。上限を上げても動作しますが、スキャンに時間がかかり、テキスト／IoC の検索は各ファイルの先頭 96 MB しか対象にならず、アーカイブから展開されるデータは 2 GB までに制限されたままです（アーカイブ爆弾対策はこの設定では変わりません）。
@@ -293,6 +296,8 @@ npx reap-shield scan ./Downloads/SomeTool --format md --output report.md
 npx reap-shield scan app.asar --format json --output report.json
 npx reap-shield scan setup.exe --fail-on medium
 npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
+npx reap-shield rules update --package core
+npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
 ```
 
@@ -305,6 +310,8 @@ npx reap-shield doctor
 | `--deep` | ASAR ファイルに対する REA の JavaScript アプリ再構築 |
 | `--provider` | REA のネイティブプロバイダー（例：`ghidra`） |
 | `--no-signature` | Authenticode の検証をスキップする |
+| `--no-yara` | YARA による照合をスキップする |
+| `--yara-rules <path>` | このスキャンで追加する YARA ルールファイルまたはフォルダー（複数指定可） |
 | `--keep-sandbox` | 展開したファイルを手動確認用に残す |
 | `--max-size <GB>` | スキャン対象の最大ファイルサイズ、0.05〜16 GB（既定 1）。安全な範囲は 0.5〜2 GB。 |
 | `-q, --quiet` | 進捗を表示しない |
@@ -354,6 +361,26 @@ npx reap-shield doctor
 
 ---
 
+<a id="yara"></a>
+## 🎯 YARA ルール
+
+REAP-Shield は、アーカイブ、インストーラー、文書から展開されたものを含むスキャン対象のすべてのファイルを、**[YARA-X](https://github.com/VirusTotal/yara-x)** で YARA ルールと照合します。YARA-X は VirusTotal による YARA の公式 Rust 実装です。WebAssembly（`@virustotal/yara-x`）として動作するため、ネイティブバイナリなしで Windows、macOS、Linux のいずれでも同じように動きます。一致はそれぞれ *YARA Signature Matches* カテゴリの検出結果になり、ルール名、説明、作成者、一致した文字列とそのオフセット、参照リンクが表示されます。
+
+ルールのライセンスはさまざまなため、**REAP-Shield にはルールが同梱されていません。** ルールは次の 2 つの方法で追加します。
+
+| 入手元 | 方法 |
+| --- | --- |
+| **YARA Forge**（推奨） | アプリでパッケージを選び **Download rules** をクリックするか、コマンドラインで `npx reap-shield rules update` を実行します。[YARA Forge](https://github.com/YARAHQ/yara-forge) は多数の公開リポジトリから品質で選別したルールをまとめたものです。`core`（約 5,000 ルール）は誤検知が最も少なく、`extended` と `full` はルールが増える分ノイズも増えます。ダウンロードしたルールは、コンパイルに成功した場合にのみ既存のルールと置き換わります。各ルールにはそれぞれのライセンスが適用されます（ルールの `author`、`reference`、`license_url` メタフィールドを参照）。 |
+| **独自のルール** | `.yar` / `.yara` ファイルをカスタムルールフォルダーに置きます（アプリの **Open custom rules folder**、またはパスを表示する `npx reap-shield rules status`）。各ファイルは独自の名前空間でコンパイルされ、不正なファイルはスキップされて報告されますが、他のファイルは読み込まれます。1 回のスキャンだけに使う場合は `--yara-rules <ファイルまたはフォルダー>` で追加します。 |
+
+ルールはユーザーごとのデータフォルダーに保存されます。Windows では `%APPDATA%\REAP-Shield\yara`、macOS では `~/Library/Application Support/REAP-Shield/yara`、Linux では `~/.config/REAP-Shield/yara` です（`REAP_YARA_DIR` で変更できます）。
+
+- **深刻度：** ルールの `severity` メタフィールド（`info` … `critical`）はそのまま使われます。ない場合は `score` フィールド（YARA Forge が使用）を変換します：90 以上は critical、75 以上は high、60 以上は medium、40 以上は low。どちらもないルールは *medium* になります。private の補助ルールは報告されず、署名済みファイルの深刻度引き下げは他の検出結果と同様に適用されます。
+- **パフォーマンス：** YARA Forge の `core` パッケージのコンパイルには約 3〜5 秒かかります。デスクトップアプリは一度コンパイルしたルールを、ルールファイルが変更されるまで以降のスキャンで再利用します。CLI は実行ごとに 1 回コンパイルします。照合は一般的な実行ファイルで約 1 秒です。各ファイルは最大 96 MB まで読み込まれ、ファイルごとに 15 秒のタイムアウトがあります。
+- **誤検知：** 一般的な Windows のシステムプログラムと開発者向けプログラム（notepad、shell32、kernel32、PowerShell、certutil、git、node）でのテストでは、`core` パッケージによる一致はありませんでした。
+
+---
+
 <a id="scoring"></a>
 ## ⚖️ 脅威スコア
 
@@ -391,7 +418,7 @@ npx reap-shield doctor
   - ページ遷移と新しいウィンドウはブロックされ、すべての権限要求は拒否されます。
   - PDF のエクスポートは JavaScript を無効にした状態でレンダリングされます。
 - **信頼できない出力。** レポートのテキストはすべて HTML と Markdown でエスケープされ、React も UI のテキストをすべてエスケープします。
-- **プライバシー。** ファイルがマシンの外に出ることはありません。テレメトリーもクラウドへの問い合わせもなく、アカウントも不要です。
+- **プライバシー。** ファイルがマシンの外に出ることはありません。テレメトリーもクラウドへの問い合わせもなく、アカウントも不要です。唯一のネットワークアクセスは任意の YARA ルールのダウンロードで、**Download rules** をクリックするか `rules update` を実行したときにのみ開始されます。
 
 ---
 
@@ -413,6 +440,7 @@ reap-shield/
 │   │   ├── strings.mjs          String extraction and IoC rules
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
+│   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -443,6 +471,7 @@ npm test
 - **フォーマット：** ZIP、TAR.GZ、RAR（WinRAR がインストールされている場合）、7z、tar.xz、フォルダー、LNK、自動実行 JavaScript と添付ファイルを含む PDF、テンプレートインジェクション付きの Office VBA ドロッパー、SFX オーバーレイ、埋め込み PE イメージ、JSE、HTML スマグリング。
 - **検出：** 安全でない Electron ASAR、Python ドロッパーのパターン、MS-OVBA 展開処理。
 - **レポート：** スコアリングと、信頼できない内容の HTML / Markdown エスケープ。
+- **YARA：** 根拠付きのカスタムルール一致、private ルールと不正なルール、アーカイブ内のファイル、スコアから深刻度への変換、YARA Forge の更新処理（ダウンロードはモック）。
 
 テスト用ファイルに含まれるのは、不審な*文字列と構造*だけです。**いずれも動作するマルウェアではありません。**
 
@@ -490,7 +519,7 @@ npm run dist
 <a id="roadmap"></a>
 ## 🗺️ ロードマップ
 
-- [ ] YARA ルールとカスタムルールパックのサポート
+- [x] YARA ルールとカスタムルールパックのサポート
 - [ ] オプションのハッシュ評価照会（オプトイン、プライバシーに配慮）
 - [ ] Inno Setup と MSIX の展開
 - [ ] REA による .NET IL の検査（`inspect-il`、`inspect-managed-artifact`）

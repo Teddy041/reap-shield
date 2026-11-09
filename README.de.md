@@ -42,6 +42,7 @@
 - [Nutzung: Desktop-App](#usage-desktop)
 - [Nutzung: CLI & CI/CD](#usage-cli)
 - [REA-Integration](#rea)
+- [YARA-Regeln](#yara)
 - [Bedrohungsbewertung](#scoring)
 - [Sicherheitsmodell](#security)
 - [Projektstruktur](#structure)
@@ -135,6 +136,7 @@ Sie erhalten eine **Bedrohungsbewertung von 0–100**, ein Urteil **Low / Medium
 | 🐍 **Skripte** | Regeln für JavaScript, Python, PowerShell, Batch und VBA. Beispiele: dekodiertes `eval`, `child_process`, obfuscator.io-Ausgabe, `marshal`/`exec`-Dropper, ctypes-Shellcode-Loader, `winreg`-Persistenz, Entschlüsselung von Browser-Passwörtern. |
 | ⚛️ **Electron- & IPC-Audit** | `nodeIntegration`, `contextIsolation:false`, `sandbox:false`, `webSecurity:false`, Remote-Modul, offengelegtes rohes `ipcRenderer`, unbeschränkte Kanal-Weiterleitung, IPC-Handler, die `exec`/`shell`/`fs` erreichen, `openExternal`, TLS-Umgehungen. |
 | 🧠 **REA-Belege** | Maßgebliche PE-Importtabellen (inklusive Delay-Load), Authenticode-Zertifikatsketten, Binärhärtung und Byte-Entropie-Karten von [REA](https://github.com/morluto/rea). Optionale Ghidra-gestützte Analyse. |
+| 🎯 **YARA-Signaturen** | Jede Datei, auch alles aus Containern Entpackte, wird mit [YARA-X](https://github.com/VirusTotal/yara-x) (WebAssembly) gegen das Regelpaket von [YARA Forge](https://github.com/YARAHQ/yara-forge) (Download per Klick) und Ihre eigenen `.yar`-Dateien geprüft. Treffer zeigen Regel, Beschreibung, Autor und die gefundenen Zeichenketten mit Offsets. |
 
 ### Desktop-App
 
@@ -261,6 +263,7 @@ npm run dev    # Vite dev server + Electron with hot reload
 | REA analysis | Fügt REA-Belege für PE-Dateien hinzu (automatisch aktiv, wenn REA gefunden wird) |
 | Deep Electron analysis | REA-Rekonstruktion von JavaScript-Anwendungen für `.asar`-Dateien (langsam) |
 | Verify signatures | Windows-Authenticode-Prüfung |
+| YARA signatures | Prüft Dateien gegen die installierten YARA-Regeln. Das Panel **YARA rules** lädt YARA Forge herunter oder aktualisiert es und öffnet den Ordner für eigene Regeln |
 | Max file size | Größte zu scannende Datei: 256 MB – 16 GB, Standard **1 GB**. Größere Einzeldateien werden mit einer klaren Meldung abgelehnt; in Ordnern werden sie übersprungen und unter *Warnings* aufgeführt. Die Auswahl wird gespeichert. |
 
 > **Sicherer Bereich für „Max file size“: 0,5 – 2 GB (1 GB empfohlen).** Nahezu jede Malware ist kleiner als 200 MB. Höhere Grenzen funktionieren, aber Scans dauern länger, die Text-/IoC-Suche deckt nur die ersten 96 MB jeder Datei ab, und aus Archiven entpackte Daten bleiben auf 2 GB begrenzt (der Schutz vor Archivbomben ändert sich mit dieser Einstellung nicht).
@@ -293,6 +296,8 @@ npx reap-shield scan ./Downloads/SomeTool --format md --output report.md
 npx reap-shield scan app.asar --format json --output report.json
 npx reap-shield scan setup.exe --fail-on medium
 npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
+npx reap-shield rules update --package core
+npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
 ```
 
@@ -305,6 +310,8 @@ npx reap-shield doctor
 | `--deep` | REA-Rekonstruktion von JavaScript-Anwendungen für ASAR-Dateien |
 | `--provider` | Nativer REA-Provider, z. B. `ghidra` |
 | `--no-signature` | Authenticode-Prüfung überspringen |
+| `--no-yara` | YARA-Abgleich überspringen |
+| `--yara-rules <path>` | Zusätzliche YARA-Regeldatei oder -ordner für diesen Scan (mehrfach angebbar) |
 | `--keep-sandbox` | Entpackte Dateien zur manuellen Prüfung behalten |
 | `--max-size <GB>` | Größte zu scannende Datei, 0,05 – 16 GB (Standard 1). Sicherer Bereich 0,5 – 2 GB. |
 | `-q, --quiet` | Keine Fortschrittsausgabe |
@@ -354,6 +361,26 @@ Führen Sie `npx reap-shield doctor` aus, um zu sehen, was gefunden wurde. REA l
 
 ---
 
+<a id="yara"></a>
+## 🎯 YARA-Regeln
+
+REAP-Shield prüft jede gescannte Datei, auch aus Archiven, Installern und Dokumenten entpackte, mit **[YARA-X](https://github.com/VirusTotal/yara-x)** gegen YARA-Regeln. YARA-X ist die offizielle Neuimplementierung von YARA in Rust durch VirusTotal. Es läuft als WebAssembly (`@virustotal/yara-x`) und funktioniert daher ohne native Binärdateien gleich unter Windows, macOS und Linux. Jeder Treffer wird zu einem Befund der Kategorie *YARA Signature Matches* mit Regelname, Beschreibung, Autor, den gefundenen Zeichenketten samt Offsets und dem Referenzlink.
+
+**REAP-Shield liefert keine Regeln mit**, weil die Lizenzen der Regeln unterschiedlich sind. Sie fügen sie auf zwei Wegen hinzu:
+
+| Quelle | So geht es |
+| --- | --- |
+| **YARA Forge** (empfohlen) | In der App ein Paket wählen und auf **Download rules** klicken; auf der Kommandozeile `npx reap-shield rules update` ausführen. [YARA Forge](https://github.com/YARAHQ/yara-forge) bündelt qualitätsgefilterte Regeln aus vielen öffentlichen Repositories. `core` (etwa 5.000 Regeln) hat die wenigsten Fehlalarme; `extended` und `full` bringen mehr Regeln und mehr Rauschen. Ein Download ersetzt die installierten Regeln erst, nachdem er erfolgreich kompiliert wurde. Jede Regel behält ihre eigene Lizenz (siehe die Meta-Felder `author`, `reference` und `license_url`). |
+| **Eigene Regeln** | Legen Sie `.yar`- / `.yara`-Dateien in den Ordner für eigene Regeln (**Open custom rules folder** in der App oder `npx reap-shield rules status`, um den Pfad anzuzeigen). Jede Datei wird in einem eigenen Namensraum kompiliert; eine fehlerhafte Datei wird übersprungen und gemeldet, die anderen werden trotzdem geladen. Für einen einzelnen Scan fügen Sie Regeln mit `--yara-rules <Datei oder Ordner>` hinzu. |
+
+Die Regeln liegen im benutzerbezogenen Datenordner: `%APPDATA%\REAP-Shield\yara` unter Windows, `~/Library/Application Support/REAP-Shield/yara` unter macOS und `~/.config/REAP-Shield/yara` unter Linux (änderbar mit `REAP_YARA_DIR`).
+
+- **Schweregrad:** Das Meta-Feld `severity` einer Regel (`info` … `critical`) wird direkt übernommen. Sonst wird das Feld `score` (von YARA Forge verwendet) umgerechnet: ab 90 critical, ab 75 high, ab 60 medium, ab 40 low. Regeln ohne beides gelten als *medium*. Private Hilfsregeln werden nie gemeldet, und die Herabstufung signierter Dateien gilt wie bei anderen Befunden.
+- **Leistung:** Das Kompilieren des YARA-Forge-Pakets `core` dauert etwa 3–5 Sekunden. Die Desktop-App kompiliert es einmal und verwendet es für weitere Scans wieder, bis sich eine Regeldatei ändert; die CLI kompiliert einmal pro Aufruf. Der Abgleich dauert bei einer typischen EXE etwa eine Sekunde. Von jeder Datei werden bis zu 96 MB gelesen, mit einem Timeout von 15 Sekunden pro Datei.
+- **Fehlalarme:** In unseren Tests mit gängigen Windows-System- und Entwicklerprogrammen (notepad, shell32, kernel32, PowerShell, certutil, git, node) lieferte das Paket `core` keine Treffer.
+
+---
+
 <a id="scoring"></a>
 ## ⚖️ Bedrohungsbewertung
 
@@ -391,7 +418,7 @@ Führen Sie `npx reap-shield doctor` aus, um zu sehen, was gefunden wurde. REA l
   - Navigation und neue Fenster sind blockiert, und alle Berechtigungsanfragen werden abgelehnt.
   - Der PDF-Export wird mit deaktiviertem JavaScript gerendert.
 - **Nicht vertrauenswürdige Ausgabe.** Alle Berichtstexte werden in HTML und Markdown maskiert, und React maskiert alle UI-Texte.
-- **Datenschutz.** Dateien verlassen nie den Rechner. Es gibt keine Telemetrie, keine Cloud-Abfrage und kein Konto.
+- **Datenschutz.** Dateien verlassen nie den Rechner. Es gibt keine Telemetrie, keine Cloud-Abfrage und kein Konto. Der einzige Netzwerkzugriff ist der optionale Download der YARA-Regeln, der nur startet, wenn Sie auf **Download rules** klicken oder `rules update` ausführen.
 
 ---
 
@@ -413,6 +440,7 @@ reap-shield/
 │   │   ├── strings.mjs          String extraction and IoC rules
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
+│   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -443,6 +471,7 @@ Die Testsuiten erzeugen alle Testdateien zur Laufzeit und decken ab:
 - **Formate:** ZIP, TAR.GZ, RAR (wenn WinRAR installiert ist), 7z, tar.xz, Ordner, LNK, PDF mit automatisch ausgeführtem JavaScript und Anhängen, Office-VBA-Dropper mit Template-Injection, SFX-Overlays, eingebettete PE-Images, JSE und HTML-Smuggling.
 - **Erkennung:** unsichere Electron-ASAR, Python-Dropper-Muster, der MS-OVBA-Dekompressor.
 - **Berichte:** Bewertung sowie HTML-/Markdown-Maskierung nicht vertrauenswürdiger Inhalte.
+- **YARA:** Treffer eigener Regeln mit Belegen, private und fehlerhafte Regeln, Archivinhalte, die Zuordnung von Score zu Schweregrad und der YARA-Forge-Updater (mit simuliertem Download).
 
 Die Testdateien enthalten nur verdächtige *Zeichenketten und Strukturen*. **Keine davon ist funktionsfähige Malware.**
 
@@ -490,7 +519,7 @@ Hilfsskripte:
 <a id="roadmap"></a>
 ## 🗺️ Roadmap
 
-- [ ] Unterstützung für YARA-Regeln und eigene Regelpakete
+- [x] Unterstützung für YARA-Regeln und eigene Regelpakete
 - [ ] Optionale Hash-Reputationsabfragen (Opt-in, datenschutzfreundlich)
 - [ ] Entpacken von Inno Setup und MSIX
 - [ ] .NET-IL-Analyse über REA (`inspect-il`, `inspect-managed-artifact`)
