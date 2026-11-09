@@ -207,11 +207,17 @@ flowchart TD
 <a id="installation"></a>
 ## 📦 Kurulum
 
-### Seçenek A: Taşınabilir Windows exe dosyası
+### Seçenek A: Tek tıkla başlatıcı (Windows, önerilen)
+
+Depoyu klonlayın (veya ZIP olarak indirin) ve proje klasöründeki **`REAP-Shield Launcher.exe`** dosyasına çift tıklayın. İlk çalıştırmada onay ister, bir konsol penceresinde `npm install` çalıştırıp arayüzü derler, ardından uygulamayı başlatır. Sonraki açılışlarda uygulama doğrudan açılır; arayüz yalnızca kaynakları değiştiğinde (örneğin `git pull` sonrasında) yeniden derlenir. Node.js 22+ gerekir; yüklü değilse başlatıcı Node.js indirme sayfasını açmayı önerir.
+
+Başlatıcı, [`launcher/Launcher.cs`](launcher/Launcher.cs) dosyasından derlenen küçük (~40 KB) bir programdır. Yalnızca npm'i, Node.js'i ve projenin `node_modules` klasöründeki Electron binary'sini çalıştırır. Kod imzalı olmadığı için Windows SmartScreen *"bilinmeyen yayımcı"* uyarısı gösterebilir. Kendiniz yeniden derlemek için: `powershell -ExecutionPolicy Bypass -File launcher\build.ps1`. İlk çalıştırma onayını atlamak için `--yes` parametresini verin.
+
+### Seçenek B: Taşınabilir Windows exe dosyası
 
 `npm run dist` ile bir kez derleyin ([Windows Exe Dosyasını Derleme](#building) bölümüne bakın), ardından `REAP-Shield.exe`'yi çalıştırın. Kurulum gerekmez. Exe kod imzalı olmadığı için Windows SmartScreen ilk açılışta *"bilinmeyen yayımcı"* uyarısı gösterebilir.
 
-### Seçenek B: Kaynak koddan
+### Seçenek C: Kaynak koddan
 
 **Gereksinimler:** Windows, macOS veya Linux üzerinde Node.js 22+ (Node 24 önerilir). Authenticode doğrulaması için Windows gerekir.
 
@@ -416,6 +422,8 @@ reap-shield/
 │   └── ui/                    React 19 + Tailwind CSS 4 dashboard
 ├── tests/                     node:test suites with synthetic (non-functional) fixtures
 ├── scripts/                   Dev launcher, demo sample/report, icon, build info
+├── launcher/                  One-click Windows launcher (C# source + build script)
+├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
 └── docs/screenshots/          README screenshots
 ```

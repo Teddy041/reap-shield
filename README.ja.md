@@ -207,11 +207,17 @@ flowchart TD
 <a id="installation"></a>
 ## 📦 インストール
 
-### 方法 A：ポータブル版 Windows 実行ファイル
+### 方法 A：ワンクリック起動ツール（Windows、推奨）
+
+リポジトリをクローン（または ZIP でダウンロード）し、プロジェクトフォルダー内の **`REAP-Shield Launcher.exe`** をダブルクリックします。初回起動時は確認を求めたうえで、コンソールウィンドウで `npm install` と UI のビルドを実行し、アプリを起動します。2 回目以降はアプリを直接開き、UI のソースが変更された場合（`git pull` の後など）にのみ再ビルドします。Node.js 22 以上が必要です。見つからない場合は、Node.js のダウンロードページを開くよう提案します。
+
+起動ツールは [`launcher/Launcher.cs`](launcher/Launcher.cs) からビルドされた小さなプログラム（約 40 KB）です。実行するのは npm、Node.js、およびプロジェクトの `node_modules` 内にある Electron バイナリのみです。コード署名されていないため、Windows SmartScreen が「発行元不明」の警告を表示する場合があります。自分で再ビルドするには `powershell -ExecutionPolicy Bypass -File launcher\build.ps1` を実行します。`--yes` を付けると初回の確認を省略できます。
+
+### 方法 B：ポータブル版 Windows 実行ファイル
 
 `npm run dist` で一度ビルドし（[Windows 実行ファイルのビルド](#building)を参照）、`REAP-Shield.exe` を実行します。インストールは不要です。実行ファイルはコード署名されていないため、初回起動時に Windows SmartScreen が「不明な発行元」の警告を表示することがあります。
 
-### 方法 B：ソースコードから
+### 方法 C：ソースコードから
 
 **動作要件：** Windows、macOS、Linux 上の Node.js 22 以上（Node 24 推奨）。Authenticode 検証には Windows が必要です。
 
@@ -416,6 +422,8 @@ reap-shield/
 │   └── ui/                    React 19 + Tailwind CSS 4 dashboard
 ├── tests/                     node:test suites with synthetic (non-functional) fixtures
 ├── scripts/                   Dev launcher, demo sample/report, icon, build info
+├── launcher/                  One-click Windows launcher (C# source + build script)
+├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
 └── docs/screenshots/          README screenshots
 ```

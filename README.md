@@ -197,11 +197,17 @@ The **analysis engine** (`src/analyzer/`) is plain Node.js and is shared by the 
 
 ## 📦 Installation
 
-### Option A: Portable Windows executable
+### Option A: One-click launcher (Windows, recommended)
+
+Clone the repository (or download it as a ZIP) and double-click **`REAP-Shield Launcher.exe`** in the project folder. On the first run it asks for confirmation, runs `npm install` and builds the UI in a console window, then starts the app. Later runs open the app directly and rebuild the UI only when its sources have changed (for example after `git pull`). Node.js 22+ is required; if it is missing, the launcher offers to open the Node.js download page.
+
+The launcher is a small (~40 KB) program built from [`launcher/Launcher.cs`](launcher/Launcher.cs). It only runs npm, Node.js and the Electron binary inside the project's `node_modules`. It is not code-signed, so Windows SmartScreen may show an *"unknown publisher"* prompt. To rebuild it yourself, run `powershell -ExecutionPolicy Bypass -File launcher\build.ps1`. Pass `--yes` to skip the first-run confirmation.
+
+### Option B: Portable Windows executable
 
 Build it once with `npm run dist` (see [Building the Windows Executable](#-building-the-windows-executable)), then run `REAP-Shield.exe`. No installer is needed. The executable is not code-signed, so Windows SmartScreen may show an *"unknown publisher"* prompt on first launch.
 
-### Option B: From source
+### Option C: From source
 
 **Requirements:** Node.js 22+ (Node 24 recommended) on Windows, macOS or Linux. Windows is required for Authenticode verification.
 
@@ -399,6 +405,8 @@ reap-shield/
 │   └── ui/                    React 19 + Tailwind CSS 4 dashboard
 ├── tests/                     node:test suites with synthetic (non-functional) fixtures
 ├── scripts/                   Dev launcher, demo sample/report, icon, build info
+├── launcher/                  One-click Windows launcher (C# source + build script)
+├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
 └── docs/screenshots/          README screenshots
 ```

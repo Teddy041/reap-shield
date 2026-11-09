@@ -207,11 +207,17 @@ Die **Analyse-Engine** (`src/analyzer/`) ist reines Node.js und wird von der Des
 <a id="installation"></a>
 ## 📦 Installation
 
-### Option A: Portable Windows-EXE
+### Option A: Ein-Klick-Launcher (Windows, empfohlen)
+
+Klonen Sie das Repository (oder laden Sie es als ZIP herunter) und doppelklicken Sie im Projektordner auf **`REAP-Shield Launcher.exe`**. Beim ersten Start fragt er nach einer Bestätigung, führt `npm install` aus und baut die Oberfläche in einem Konsolenfenster; danach startet er die App. Spätere Starts öffnen die App direkt und bauen die Oberfläche nur neu, wenn sich ihre Quellen geändert haben (zum Beispiel nach `git pull`). Node.js 22+ ist erforderlich; fehlt es, bietet der Launcher an, die Node.js-Downloadseite zu öffnen.
+
+Der Launcher ist ein kleines Programm (~40 KB), gebaut aus [`launcher/Launcher.cs`](launcher/Launcher.cs). Er führt nur npm, Node.js und die Electron-Binärdatei im `node_modules` des Projekts aus. Er ist nicht codesigniert, daher kann Windows SmartScreen einen Hinweis *„Unbekannter Herausgeber“* anzeigen. Zum selbst Neubauen: `powershell -ExecutionPolicy Bypass -File launcher\build.ps1`. Mit `--yes` wird die Bestätigung beim ersten Start übersprungen.
+
+### Option B: Portable Windows-EXE
 
 Einmal mit `npm run dist` erstellen (siehe [Windows-EXE erstellen](#building)), dann `REAP-Shield.exe` starten. Keine Installation nötig. Die Datei ist nicht codesigniert, daher kann Windows SmartScreen beim ersten Start einen Hinweis *„Unbekannter Herausgeber“* anzeigen.
 
-### Option B: Aus dem Quellcode
+### Option C: Aus dem Quellcode
 
 **Voraussetzungen:** Node.js 22+ (Node 24 empfohlen) unter Windows, macOS oder Linux. Für die Authenticode-Prüfung wird Windows benötigt.
 
@@ -416,6 +422,8 @@ reap-shield/
 │   └── ui/                    React 19 + Tailwind CSS 4 dashboard
 ├── tests/                     node:test suites with synthetic (non-functional) fixtures
 ├── scripts/                   Dev launcher, demo sample/report, icon, build info
+├── launcher/                  One-click Windows launcher (C# source + build script)
+├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
 └── docs/screenshots/          README screenshots
 ```

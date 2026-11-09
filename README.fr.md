@@ -207,11 +207,17 @@ Le **moteur d'analyse** (`src/analyzer/`) est en Node.js pur et partagé par l'a
 <a id="installation"></a>
 ## 📦 Installation
 
-### Option A : exécutable Windows portable
+### Option A : lanceur en un clic (Windows, recommandé)
+
+Clonez le dépôt (ou téléchargez-le en ZIP) puis double-cliquez sur **`REAP-Shield Launcher.exe`** dans le dossier du projet. Au premier lancement, il demande une confirmation, exécute `npm install` et construit l'interface dans une fenêtre de console, puis démarre l'application. Les lancements suivants ouvrent directement l'application et ne reconstruisent l'interface que si ses sources ont changé (par exemple après `git pull`). Node.js 22+ est requis ; s'il est absent, le lanceur propose d'ouvrir la page de téléchargement de Node.js.
+
+Le lanceur est un petit programme (~40 Ko) compilé à partir de [`launcher/Launcher.cs`](launcher/Launcher.cs). Il n'exécute que npm, Node.js et le binaire Electron présent dans le `node_modules` du projet. Il n'est pas signé, Windows SmartScreen peut donc afficher un avertissement *« éditeur inconnu »*. Pour le recompiler vous-même : `powershell -ExecutionPolicy Bypass -File launcher\build.ps1`. Ajoutez `--yes` pour ignorer la confirmation du premier lancement.
+
+### Option B : exécutable Windows portable
 
 Compilez-le une fois avec `npm run dist` (voir [Compiler l'exécutable Windows](#building)), puis lancez `REAP-Shield.exe`. Aucune installation n'est nécessaire. L'exécutable n'est pas signé numériquement : Windows SmartScreen peut afficher un avertissement *« éditeur inconnu »* au premier lancement.
 
-### Option B : depuis les sources
+### Option C : depuis les sources
 
 **Prérequis :** Node.js 22+ (Node 24 recommandé) sous Windows, macOS ou Linux. Windows est nécessaire pour la vérification Authenticode.
 
@@ -416,6 +422,8 @@ reap-shield/
 │   └── ui/                    React 19 + Tailwind CSS 4 dashboard
 ├── tests/                     node:test suites with synthetic (non-functional) fixtures
 ├── scripts/                   Dev launcher, demo sample/report, icon, build info
+├── launcher/                  One-click Windows launcher (C# source + build script)
+├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
 └── docs/screenshots/          README screenshots
 ```

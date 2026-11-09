@@ -207,11 +207,17 @@ flowchart TD
 <a id="installation"></a>
 ## 📦 安装
 
-### 方式 A：便携版 Windows 可执行文件
+### 方式 A：一键启动器（Windows，推荐）
+
+克隆仓库（或以 ZIP 下载），然后双击项目文件夹中的 **`REAP-Shield Launcher.exe`**。首次运行时，它会先请求确认，然后在控制台窗口中执行 `npm install` 并构建界面，最后启动应用。之后再次运行会直接打开应用，只有在界面源码发生变化时（例如 `git pull` 之后）才会重新构建。需要 Node.js 22 及以上版本；如果未安装，启动器会提示打开 Node.js 下载页面。
+
+启动器是由 [`launcher/Launcher.cs`](launcher/Launcher.cs) 编译而成的小程序（约 40 KB），只会运行 npm、Node.js 以及项目 `node_modules` 中的 Electron 可执行文件。它没有代码签名，因此 Windows SmartScreen 可能会显示“未知发布者”提示。如需自行重新编译，请运行 `powershell -ExecutionPolicy Bypass -File launcher\build.ps1`。加上 `--yes` 参数可跳过首次运行的确认。
+
+### 方式 B：便携版 Windows 可执行文件
 
 使用 `npm run dist` 构建一次（参见[构建 Windows 可执行文件](#building)），然后运行 `REAP-Shield.exe`，无需安装。该可执行文件未进行代码签名，因此首次启动时 Windows SmartScreen 可能会显示“未知发布者”提示。
 
-### 方式 B：从源码运行
+### 方式 C：从源码运行
 
 **环境要求：** Windows、macOS 或 Linux 上的 Node.js 22+（推荐 Node 24）。Authenticode 验证需要 Windows。
 
@@ -416,6 +422,8 @@ reap-shield/
 │   └── ui/                    React 19 + Tailwind CSS 4 dashboard
 ├── tests/                     node:test suites with synthetic (non-functional) fixtures
 ├── scripts/                   Dev launcher, demo sample/report, icon, build info
+├── launcher/                  One-click Windows launcher (C# source + build script)
+├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
 └── docs/screenshots/          README screenshots
 ```
