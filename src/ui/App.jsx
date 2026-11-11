@@ -157,10 +157,7 @@ export default function App() {
     <div className="cyber-grid min-h-full">
       <header className="sticky top-0 z-10 border-b border-edge bg-void/85 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-3">
-          <svg viewBox="0 0 64 64" className="h-9 w-9 text-neon" fill="none" stroke="currentColor" strokeWidth="3">
-            <path d="M32 4 L54 12 V30 C54 44 44 54 32 60 C20 54 10 44 10 30 V12 Z" strokeLinejoin="round" />
-            <path d="M22 32 L29 39 L43 25" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
+          <img src="./logo.png" alt="REAP-Shield logo" className="h-10 w-10 rounded-lg" draggable="false" />
           <div>
             <div className="text-lg font-bold tracking-wide">
               REAP<span className="text-neon">-Shield</span>

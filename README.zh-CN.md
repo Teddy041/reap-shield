@@ -453,6 +453,7 @@ reap-shield/
 ├── launcher/                  One-click Windows launcher (C# source + build script)
 ├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
+├── assets/logo-source.webp    Logo source image (icons are generated from it)
 └── docs/screenshots/          README screenshots
 ```
 
@@ -500,7 +501,7 @@ npm run dist
 
 | 脚本 | 用途 |
 | --- | --- |
-| `npm run icon` | 根据矢量标志重新生成 `build/icon.png` |
+| `npm run icon` | 根据 `assets/logo-source.webp` 重新生成 `build/icon.png` 和应用内标志 |
 | `npm run demo-report` | 重新生成浏览器演示模式使用的报告 |
 | `npm run screenshots` | 从真实应用重新截取 `docs/screenshots/`，本地路径会被匿名化。 |
 

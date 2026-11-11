@@ -50,6 +50,10 @@ function configureReaForPackagedBuild() {
   }
 }
 const UI_INDEX = path.join(ROOT, 'dist', 'ui', 'index.html');
+/** Window icon (title bar / taskbar). The packaged exe also embeds build/icon.png. */
+const WINDOW_ICON = [path.join(ROOT, 'dist', 'ui', 'logo.png'), path.join(ROOT, 'src', 'ui', 'public', 'logo.png')].find((p) =>
+  originalFs.existsSync(p),
+);
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -82,6 +86,7 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: '#070b12',
     title: 'REAP-Shield',
+    ...(WINDOW_ICON ? { icon: WINDOW_ICON } : {}),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {

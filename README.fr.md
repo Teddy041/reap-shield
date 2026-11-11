@@ -453,6 +453,7 @@ reap-shield/
 ├── launcher/                  One-click Windows launcher (C# source + build script)
 ├── REAP-Shield Launcher.exe   Prebuilt launcher (see Installation)
 ├── build/icon.png             Application icon
+├── assets/logo-source.webp    Logo source image (icons are generated from it)
 └── docs/screenshots/          README screenshots
 ```
 
@@ -500,7 +501,7 @@ Scripts utilitaires :
 
 | Script | Rôle |
 | --- | --- |
-| `npm run icon` | Régénérer `build/icon.png` à partir du logo vectoriel |
+| `npm run icon` | Régénérer `build/icon.png` et le logo de l'application à partir de `assets/logo-source.webp` |
 | `npm run demo-report` | Régénérer le rapport du mode démo navigateur |
 | `npm run screenshots` | Recapturer `docs/screenshots/` depuis la véritable application. Les chemins locaux sont anonymisés. |
 
