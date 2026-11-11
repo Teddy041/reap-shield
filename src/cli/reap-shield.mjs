@@ -5,8 +5,9 @@
  *   reap-shield scan <file|folder> [options]
  *   reap-shield doctor
  *   reap-shield rules status | update [--package core|extended|full]
+ *   reap-shield bench --malicious <dir> --clean <dir> [options]
  *
- * Exit codes (for CI/CD gates):
+ * Exit codes (for CI/CD gates; for "bench", 1 means a --min-detection / --max-fp gate failed):
  *   0  scan finished and the verdict is below --fail-on
  *   1  scan finished and the verdict is at or above --fail-on
  *   2  usage error
@@ -18,6 +19,7 @@ import { scanFile, TOOL } from '../analyzer/index.mjs';
 import { toMarkdown, toHtml } from '../analyzer/report.mjs';
 import { locateRea } from '../analyzer/rea.mjs';
 import { LEVELS } from '../analyzer/scoring.mjs';
+import { runBenchmark, benchmarkToMarkdown, parseLevel, DEFAULT_THRESHOLD } from '../analyzer/benchmark.mjs';
 import { yaraStatus, updateForgeRules, ensureCustomDir, FORGE_PACKAGES, FORGE_DEFAULT_PACKAGE, FORGE_HOME, FORGE_NOTE } from '../analyzer/yara.mjs';
 import { maxSizeGbToBytes, SAFE_SIZE_RANGE_NOTE, MAX_SIZE_MIN_GB, MAX_SIZE_MAX_GB, LARGE_FILE_RELIABILITY, formatBytes } from '../analyzer/config.mjs';
 
@@ -44,6 +46,7 @@ Usage:
   reap-shield doctor
   reap-shield rules status
   reap-shield rules update [--package ${FORGE_PACKAGES.join('|')}]
+  reap-shield bench --malicious <path> --clean <path> [options]
   reap-shield --help | --version
 
 Scan options:
@@ -65,6 +68,20 @@ ${PAD}Why larger files are less reliable:
 ${LARGE_FILE_RELIABILITY.map((r) => wrap(`- ${r}`, PAD)).join('\n')}
   -q, --quiet            Suppress progress output on stderr
 
+Benchmark options (measure detection and false-positive rates on a labelled corpus):
+      --malicious <path> File or folder of known-malicious samples (repeatable)
+      --clean <path>     File or folder of known-clean samples (repeatable)
+      --threshold <lvl>  Lowest verdict that counts as detected: medium (default), high, critical
+      --ext <list>       Only use files with these extensions, e.g. exe,dll,ps1
+      --limit <n>        Scan at most n samples per label (seeded random subset)
+      --seed <n>         Seed for --limit (default 1)
+      --jobs <n>         Samples scanned in parallel, 1-8 (default 1)
+      --min-detection <%>
+                         Exit with code 1 when the detection rate is below this percentage
+      --max-fp <%>       Exit with code 1 when the false positive rate is above this percentage
+  -o, --output <dir>     Folder for benchmark.json and benchmark.md (default temp/benchmark/<time>)
+${wrap('Scan options such as --no-rea, --no-signature, --no-yara and --max-size also apply. Handle malware corpora only inside an isolated virtual machine.', PAD)}
+
 YARA rules (YARA-X engine):
 ${wrap(`"rules update" downloads the latest YARA Forge package (${FORGE_HOME}, default "${FORGE_DEFAULT_PACKAGE}") into the per-user data folder; your own *.yar files go in the custom folder shown by "rules status". ${FORGE_NOTE}`, '  ')}
 
@@ -73,7 +90,7 @@ documents (.pdf .docm .xlsm .lnk) and scripts (.js .py .ps1 .vbs .hta) - see REA
 Nothing is ever executed: all analysis is static.`;
 
 function parseArgs(argv) {
-  const args = { _: [], format: 'text', failOn: 'high', rea: true, deep: false, signature: true, yara: true, yaraRules: [], keepSandbox: false, quiet: false };
+  const args = { _: [], malicious: [], clean: [], format: 'text', failOn: 'high', rea: true, deep: false, signature: true, yara: true, yaraRules: [], keepSandbox: false, quiet: false };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const next = () => {
@@ -97,6 +114,15 @@ function parseArgs(argv) {
       case '--keep-sandbox': args.keepSandbox = true; break;
       case '--max-size': args.maxSize = next(); break;
       case '-q': case '--quiet': args.quiet = true; break;
+      case '--malicious': args.malicious.push(next()); break;
+      case '--clean': args.clean.push(next()); break;
+      case '--threshold': args.threshold = next(); break;
+      case '--ext': args.ext = next().split(',').map((e) => e.trim()).filter(Boolean); break;
+      case '--limit': args.limit = intArg(a, next(), 1); break;
+      case '--seed': args.seed = intArg(a, next(), 0); break;
+      case '--jobs': args.jobs = intArg(a, next(), 1, 8); break;
+      case '--min-detection': args.minDetection = pctArg(a, next()); break;
+      case '--max-fp': args.maxFp = pctArg(a, next()); break;
       default:
         if (a.startsWith('-')) throw new UsageError(`Unknown option: ${a}`);
         args._.push(a);
@@ -115,6 +141,18 @@ function parseArgs(argv) {
 }
 
 class UsageError extends Error {}
+
+function intArg(name, value, min, max = Number.MAX_SAFE_INTEGER) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < min || n > max) throw new UsageError(`${name} expects a whole number between ${min} and ${max}`);
+  return n;
+}
+
+function pctArg(name, value) {
+  const n = Number(String(value).replace(/%$/, ''));
+  if (!Number.isFinite(n) || n < 0 || n > 100) throw new UsageError(`${name} expects a percentage between 0 and 100`);
+  return n / 100;
+}
 
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 const c = (code, s) => (useColor ? `\x1b[${code}m${s}\x1b[0m` : s);
@@ -199,6 +237,78 @@ async function rules(sub, args) {
   return 2;
 }
 
+const pctText = (v) => (v === null || v === undefined ? 'n/a' : `${(v * 100).toFixed(1)}%`);
+
+async function bench(args) {
+  if (!args.malicious.length && !args.clean.length) {
+    process.stderr.write('Error: "bench" needs at least one --malicious or --clean path.\n');
+    return 2;
+  }
+  let threshold;
+  try {
+    threshold = parseLevel(args.threshold ?? DEFAULT_THRESHOLD);
+    if (threshold === 'Low') throw new Error('every scan is at least "low", so the threshold must be medium, high or critical');
+  } catch (err) {
+    process.stderr.write(`Error: --threshold: ${err.message}\n`);
+    return 2;
+  }
+  const showProgress = !args.quiet && process.stderr.isTTY;
+  let result;
+  try {
+    result = await runBenchmark({
+      malicious: args.malicious,
+      clean: args.clean,
+      threshold,
+      limit: args.limit,
+      seed: args.seed,
+      extensions: args.ext,
+      jobs: args.jobs,
+      maxBytes: args.maxInputBytes ?? maxSizeGbToBytes(1),
+      scanOptions: { useRea: args.rea, deep: args.deep, provider: args.provider, verifySignature: args.signature, useYara: args.yara, yaraRules: args.yaraRules },
+      onSample: (done, total, r) => {
+        if (args.quiet) return;
+        const line = `[${done}/${total}] ${r.label.padEnd(9)} ${r.error ? 'ERROR   ' : `${r.level.padEnd(8)} ${String(r.score).padStart(3)}`} ${path.basename(r.path)}`;
+        if (showProgress) process.stderr.write(`\r\x1b[2K${line.slice(0, 110)}`);
+        else process.stderr.write(`${line}\n`);
+      },
+    });
+    if (showProgress) process.stderr.write('\r\x1b[2K');
+  } catch (err) {
+    if (showProgress) process.stderr.write('\r\x1b[2K');
+    process.stderr.write(`Benchmark failed: ${err.message}\n`);
+    return 3;
+  }
+
+  const outDir = path.resolve(args.output ?? path.join('temp', 'benchmark', result.finishedAt.replace(/[:.]/g, '-')));
+  await fs.mkdir(outDir, { recursive: true });
+  await fs.writeFile(path.join(outDir, 'benchmark.json'), JSON.stringify(result, null, 2));
+  await fs.writeFile(path.join(outDir, 'benchmark.md'), benchmarkToMarkdown(result));
+
+  const m = result.metrics;
+  const p = m.primary;
+  const out = [
+    `${c('1', 'REAP-Shield benchmark')}  (detected = ${threshold} or higher)`,
+    `  Samples          ${m.samples.malicious} malicious, ${m.samples.clean} clean, ${m.samples.errors} errors`,
+    `  Detection rate   ${c('1', pctText(p.detectionRate))}  (${p.tp}/${p.tp + p.fn})`,
+    `  False positives  ${c('1', pctText(p.falsePositiveRate))}  (${p.fp}/${p.fp + p.tn})`,
+    `  Precision / F1   ${pctText(p.precision)} / ${p.f1 ?? 'n/a'}`,
+    `  Scan time        p50 ${m.timing.p50Ms} ms, p95 ${m.timing.p95Ms} ms`,
+    `  Report           ${path.join(outDir, 'benchmark.md')}`,
+  ];
+  process.stdout.write(`${out.join('\n')}\n`);
+
+  let failed = false;
+  if (args.minDetection !== undefined && (p.detectionRate ?? 0) < args.minDetection) {
+    process.stderr.write(`Gate failed: detection rate ${pctText(p.detectionRate)} is below ${pctText(args.minDetection)}.\n`);
+    failed = true;
+  }
+  if (args.maxFp !== undefined && (p.falsePositiveRate ?? 0) > args.maxFp) {
+    process.stderr.write(`Gate failed: false positive rate ${pctText(p.falsePositiveRate)} is above ${pctText(args.maxFp)}.\n`);
+    failed = true;
+  }
+  return failed ? 1 : 0;
+}
+
 async function main(argv) {
   let args;
   try {
@@ -218,8 +328,9 @@ async function main(argv) {
   }
   if (command === 'doctor') return doctor();
   if (command === 'rules') return rules(target, args);
+  if (command === 'bench') return bench(args);
   if (command !== 'scan' || !target) {
-    process.stderr.write(`Error: expected "scan <file>", "rules" or "doctor".\n\n${HELP}\n`);
+    process.stderr.write(`Error: expected "scan <file>", "bench", "rules" or "doctor".\n\n${HELP}\n`);
     return 2;
   }
 

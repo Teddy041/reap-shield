@@ -80,6 +80,13 @@ export function parsePEBuffer(buf, fileSize = buf.length) {
     certificate: { present: false, offset: 0, size: 0 },
     overlay: { present: false, offset: 0, size: 0, entropy: 0 },
     packers: [],
+    /** Debug directory entry types (IMAGE_DEBUG_TYPE_*), e.g. 2 = CodeView, 16 = Repro. */
+    debugTypes: [],
+    /**
+     * Deterministic build (/Brepro, Roslyn "deterministic"): the header timestamp is a
+     * content hash, not a date, so it often lies in the future without being forged.
+     */
+    reproducible: false,
   };
   const u16 = (o) => (o + 2 <= buf.length ? buf.readUInt16LE(o) : null);
   const u32 = (o) => (o + 4 <= buf.length ? buf.readUInt32LE(o) : null);
@@ -196,6 +203,21 @@ export function parsePEBuffer(buf, fileSize = buf.length) {
 
   // CLR runtime header => .NET assembly.
   pe.isDotNet = dataDir(14).rva !== 0;
+
+  // Debug directory: an array of 28-byte IMAGE_DEBUG_DIRECTORY entries; Type is at +12.
+  const dbg = dataDir(6);
+  if (dbg.rva && dbg.size >= 28) {
+    const off = rvaToOffset(dbg.rva);
+    if (off !== null) {
+      const count = Math.min(Math.floor(dbg.size / 28), 32);
+      for (let i = 0; i < count; i += 1) {
+        const type = u32(off + i * 28 + 12);
+        if (type === null) break;
+        if (!pe.debugTypes.includes(type)) pe.debugTypes.push(type);
+      }
+    }
+  }
+  pe.reproducible = pe.debugTypes.includes(16);
 
   // Import table
   const imp = dataDir(1);

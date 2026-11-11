@@ -299,6 +299,7 @@ npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
 npx reap-shield rules update --package core
 npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
 ```
 
 | オプション | 意味 |
@@ -441,6 +442,7 @@ reap-shield/
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
 │   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
+│   │   ├── benchmark.mjs        Detection benchmark: labelled corpus, metrics and report
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -473,6 +475,7 @@ npm test
 - **検出：** 安全でない Electron ASAR、Python ドロッパーのパターン、MS-OVBA 展開処理。
 - **レポート：** スコアリングと、信頼できない内容の HTML / Markdown エスケープ。
 - **YARA：** 根拠付きのカスタムルール一致、private ルールと不正なルール、アーカイブ内のファイル、スコアから深刻度への変換、YARA Forge の更新処理（ダウンロードはモック）。
+- **ベンチマーク：** コーパスの収集（重複除去、シード付きサンプリング、ラベル矛盾）、混同行列の指標、サンプルごとのエラー処理、合成サンプルによるエンドツーエンド実行。
 
 テスト用ファイルに含まれるのは、不審な*文字列と構造*だけです。**いずれも動作するマルウェアではありません。**
 
@@ -482,6 +485,34 @@ npm test
 npm run build:ui
 REAP_SMOKE_TEST=/path/to/sample.zip REAP_SMOKE_PDF=/tmp/report.pdf npx electron .
 ```
+
+### 検出ベンチマーク
+
+```bash
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
+npx reap-shield bench --clean "C:/Windows/System32" --ext exe,dll --limit 300 --max-fp 2
+```
+
+REAP-Shield が悪性ファイルと正常ファイルをどれだけ正しく区別できるかを、**ご自身のラベル付きコーパス**で測定します。各サンプルは通常の静的解析にかけられ（何も実行されません）、結果は `benchmark.md` と `benchmark.json` に書き出されます。
+
+- **指標：** `--threshold` レベルでの検出率（再現率）、誤検知率、適合率、F1。さらにしきい値ごと（*Medium+*、*High+*、*Critical+*）の表。
+- **内訳：** ラベルごとの判定分布、ファイル種別ごとの結果、正常ファイルで最も多く発火するルール（誤検知の原因）、悪性ファイルでのみ見られるルール。
+- **一覧：** 見逃した悪性サンプルと誤検知のすべてを、種別・サイズ・スコア・SHA-256 付きで表示。見逃したサンプルは新しいルール作成の最良の材料です。
+- **コーパスの扱い：** フォルダーは再帰的に走査され、空ファイル、完全な重複（SHA-256）、両方のラベルが付いたファイルはスキップされて集計されます。`--limit` と `--seed` で再現可能なランダムサブセットを選び、`--ext` で指定した拡張子のみを使います。
+- **CI ゲート：** `--min-detection <%>` と `--max-fp <%>` により、率が悪化したときにコマンドが終了コード `1` で終了します。
+
+| オプション | 意味 |
+| --- | --- |
+| `--malicious <path>` | 既知の悪性サンプルのファイルまたはフォルダー（複数指定可） |
+| `--clean <path>` | 既知の正常サンプルのファイルまたはフォルダー（複数指定可） |
+| `--threshold <level>` | 検出とみなす最低判定: `medium`（既定）、`high`、`critical` |
+| `--ext <list>` | 指定した拡張子のみ。例: `exe,dll,ps1` |
+| `--limit <n>` | ラベルごとに最大 *n* 件（シード付きランダムサブセット、`--seed`） |
+| `--jobs <n>` | 並列にスキャンするサンプル数、1 – 8（既定 1） |
+| `--min-detection <%>` / `--max-fp <%>` | 検出率が下回る / 誤検知率が上回ると終了コード `1` |
+| `-o, --output <dir>` | 出力フォルダー（既定 `temp/benchmark/<時刻>`） |
+
+> **マルウェアは必ず隔離された仮想マシン内でのみ扱ってください。** MalwareBazaar などのコレクションはサンプルをパスワード付き ZIP で配布しています。暗号化アーカイブは展開されず報告のみとなるため、先に VM 内で展開してください。実行中にウイルス対策ソフトがサンプルを隔離した場合、そのサンプルはエラーとして記録され、実行は継続します。小さい、または偏ったコーパスは誤解を招く率になります。
 
 ---
 
@@ -521,6 +552,7 @@ npm run dist
 ## 🗺️ ロードマップ
 
 - [x] YARA ルールとカスタムルールパックのサポート
+- [x] ラベル付きコーパスによる検出ベンチマーク（検出率と誤検知率）
 - [ ] オプションのハッシュ評価照会（オプトイン、プライバシーに配慮）
 - [ ] Inno Setup と MSIX の展開
 - [ ] REA による .NET IL の検査（`inspect-il`、`inspect-managed-artifact`）

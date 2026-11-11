@@ -299,6 +299,7 @@ npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
 npx reap-shield rules update --package core
 npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
 ```
 
 | 选项 | 含义 |
@@ -441,6 +442,7 @@ reap-shield/
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
 │   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
+│   │   ├── benchmark.mjs        Detection benchmark: labelled corpus, metrics and report
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -473,6 +475,7 @@ npm test
 - **检测：** 不安全的 Electron ASAR、Python 投放器特征、MS-OVBA 解压器。
 - **报告：** 评分，以及对不可信内容的 HTML / Markdown 转义。
 - **YARA：** 带证据的自定义规则匹配、private 规则与错误规则、压缩包内的文件、分数到严重性的映射，以及 YARA Forge 更新程序（使用模拟下载）。
+- **基准测试：** 语料收集（去重、可复现抽样、标签冲突）、混淆矩阵指标、逐样本错误处理，以及基于合成样本的端到端运行。
 
 测试文件只包含可疑的*字符串和结构*。**它们都不是可运行的恶意软件。**
 
@@ -482,6 +485,34 @@ npm test
 npm run build:ui
 REAP_SMOKE_TEST=/path/to/sample.zip REAP_SMOKE_PDF=/tmp/report.pdf npx electron .
 ```
+
+### 检测基准测试
+
+```bash
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
+npx reap-shield bench --clean "C:/Windows/System32" --ext exe,dll --limit 300 --max-fp 2
+```
+
+在**您自己的已标注语料**上衡量 REAP-Shield 区分恶意文件与正常文件的能力。每个样本都会经过常规静态分析（不执行任何内容），结果写入 `benchmark.md` 和 `benchmark.json`：
+
+- **指标：** 在 `--threshold` 级别下的检出率（召回率）、误报率、精确率和 F1，另附每个阈值（*Medium+*、*High+*、*Critical+*）的表格。
+- **细分：** 按标签的判定分布、按文件类型的结果、在正常文件上触发最多的规则（误报来源），以及只在恶意文件上出现的规则。
+- **列表：** 每个漏检的恶意样本和每个误报，附类型、大小、分数和 SHA-256。漏检样本是编写新规则最有价值的素材。
+- **语料处理：** 文件夹会被递归遍历；空文件、完全重复的文件（SHA-256）以及同时带两种标签的文件会被跳过并计数。`--limit` 配合 `--seed` 选取可复现的随机子集；`--ext` 只保留指定扩展名。
+- **CI 门禁：** `--min-detection <%>` 和 `--max-fp <%>` 会在指标变差时使命令以退出码 `1` 结束。
+
+| 选项 | 含义 |
+| --- | --- |
+| `--malicious <path>` | 已知恶意样本的文件或文件夹（可重复） |
+| `--clean <path>` | 已知正常样本的文件或文件夹（可重复） |
+| `--threshold <level>` | 视为检出的最低判定：`medium`（默认）、`high`、`critical` |
+| `--ext <list>` | 仅使用这些扩展名，例如 `exe,dll,ps1` |
+| `--limit <n>` | 每个标签最多 *n* 个样本（可复现的随机子集，`--seed`） |
+| `--jobs <n>` | 并行扫描的样本数，1 – 8（默认 1） |
+| `--min-detection <%>` / `--max-fp <%>` | 检出率更低 / 误报率更高时以退出码 `1` 结束 |
+| `-o, --output <dir>` | 输出文件夹（默认 `temp/benchmark/<时间>`） |
+
+> **只在隔离的虚拟机中处理恶意软件。** MalwareBazaar 等样本库以带密码的 ZIP 分发样本：请先在虚拟机内解压，因为加密压缩包只会被报告，不会被解包。如果杀毒软件在运行中隔离了某个样本，它会被记为错误，运行继续进行。语料过小或偏向一方会得到误导性的比率。
 
 ---
 
@@ -521,6 +552,7 @@ npm run dist
 ## 🗺️ 路线图
 
 - [x] 支持 YARA 规则和自定义规则包
+- [x] 基于已标注语料的检测基准测试（检出率与误报率）
 - [ ] 可选的哈希信誉查询（需用户开启，保护隐私）
 - [ ] 解包 Inno Setup 和 MSIX
 - [ ] 通过 REA 检查 .NET IL（`inspect-il`、`inspect-managed-artifact`）

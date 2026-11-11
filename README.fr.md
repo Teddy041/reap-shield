@@ -299,6 +299,7 @@ npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
 npx reap-shield rules update --package core
 npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
 ```
 
 | Option | Signification |
@@ -441,6 +442,7 @@ reap-shield/
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
 │   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
+│   │   ├── benchmark.mjs        Detection benchmark: labelled corpus, metrics and report
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -473,6 +475,7 @@ Les suites génèrent tous les fichiers de test à l'exécution et couvrent :
 - **Détection :** ASAR Electron non sécurisé, motifs de dropper Python, décompresseur MS-OVBA.
 - **Rapports :** score et échappement HTML / Markdown du contenu non fiable.
 - **YARA :** correspondances de règles personnelles avec preuves, règles privées et invalides, contenu d'archives, conversion du score en sévérité et mise à jour YARA Forge (avec un téléchargement simulé).
+- **Benchmark :** collecte du corpus (doublons, échantillonnage reproductible, conflits d’étiquettes), métriques de la matrice de confusion, gestion des erreurs par échantillon et exécution de bout en bout sur des échantillons synthétiques.
 
 Les fichiers de test ne contiennent que des *chaînes et structures* suspectes. **Aucun n'est un malware fonctionnel.**
 
@@ -482,6 +485,34 @@ Test de fumée de bout en bout de la véritable application de bureau. Il affich
 npm run build:ui
 REAP_SMOKE_TEST=/path/to/sample.zip REAP_SMOKE_PDF=/tmp/report.pdf npx electron .
 ```
+
+### Benchmark de détection
+
+```bash
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
+npx reap-shield bench --clean "C:/Windows/System32" --ext exe,dll --limit 300 --max-fp 2
+```
+
+Mesurez dans quelle mesure REAP-Shield sépare les fichiers malveillants des fichiers sains sur **votre propre corpus étiqueté**. Chaque échantillon passe par l’analyse statique habituelle (rien n’est exécuté) et le résultat est écrit dans `benchmark.md` et `benchmark.json` :
+
+- **Métriques :** taux de détection (rappel), taux de faux positifs, précision et F1 au niveau `--threshold`, plus un tableau pour chaque seuil (*Medium+*, *High+*, *Critical+*).
+- **Ventilations :** répartition des verdicts par étiquette, résultats par type de fichier, règles qui se déclenchent le plus sur les fichiers sains (sources de faux positifs) et règles vues uniquement sur les fichiers malveillants.
+- **Listes :** chaque échantillon malveillant manqué et chaque faux positif, avec type, taille, score et SHA-256. Les échantillons manqués sont la meilleure base pour écrire de nouvelles règles.
+- **Corpus :** les dossiers sont parcourus récursivement ; les fichiers vides, les doublons exacts (SHA-256) et les fichiers étiquetés des deux côtés sont ignorés et comptés. `--limit` avec `--seed` choisit un sous-ensemble aléatoire reproductible ; `--ext` ne garde que les extensions indiquées.
+- **Contrôles CI :** `--min-detection <%>` et `--max-fp <%>` font sortir la commande avec le code `1` quand un taux se dégrade.
+
+| Option | Signification |
+| --- | --- |
+| `--malicious <path>` | Fichier ou dossier d’échantillons malveillants connus (répétable) |
+| `--clean <path>` | Fichier ou dossier d’échantillons sains connus (répétable) |
+| `--threshold <level>` | Verdict minimal compté comme détecté : `medium` (par défaut), `high`, `critical` |
+| `--ext <list>` | Uniquement ces extensions, p. ex. `exe,dll,ps1` |
+| `--limit <n>` | Au plus *n* échantillons par étiquette (sous-ensemble aléatoire reproductible, `--seed`) |
+| `--jobs <n>` | Échantillons analysés en parallèle, 1 – 8 (par défaut 1) |
+| `--min-detection <%>` / `--max-fp <%>` | Code de sortie `1` si le taux de détection est plus bas / le taux de faux positifs plus élevé |
+| `-o, --output <dir>` | Dossier de sortie (par défaut `temp/benchmark/<heure>`) |
+
+> **Ne manipulez des logiciels malveillants que dans une machine virtuelle isolée.** Des collections comme MalwareBazaar fournissent les échantillons dans des ZIP protégés par mot de passe : extrayez-les d’abord dans la VM, car les archives chiffrées sont signalées, pas décompressées. Si un antivirus met un échantillon en quarantaine pendant l’exécution, il est listé comme erreur et l’exécution continue. Un corpus petit ou déséquilibré donne des taux trompeurs.
 
 ---
 
@@ -521,6 +552,7 @@ Scripts utilitaires :
 ## 🗺️ Feuille de route
 
 - [x] Prise en charge des règles YARA et de packs de règles personnalisés
+- [x] Benchmark de détection sur des corpus étiquetés (taux de détection et de faux positifs)
 - [ ] Recherches optionnelles de réputation des empreintes (sur activation, respectueuses de la vie privée)
 - [ ] Décompression d'Inno Setup et MSIX
 - [ ] Inspection IL .NET via REA (`inspect-il`, `inspect-managed-artifact`)

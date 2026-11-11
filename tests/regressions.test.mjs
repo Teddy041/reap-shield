@@ -13,7 +13,8 @@ import { scanFile } from '../src/analyzer/index.mjs';
 import { Sandbox } from '../src/analyzer/sandbox.mjs';
 import { extractAsar } from '../src/analyzer/extractors.mjs';
 import { analyzePdf } from '../src/analyzer/documents.mjs';
-import { decodeText } from '../src/analyzer/strings.mjs';
+import { decodeText, scanIocs } from '../src/analyzer/strings.mjs';
+import { parsePEBuffer } from '../src/analyzer/pe.mjs';
 import { detectFileType } from '../src/analyzer/fileType.mjs';
 import { toMarkdown } from '../src/analyzer/report.mjs';
 import { buildZip, buildAsar } from './fixtures.mjs';
@@ -162,4 +163,71 @@ test('report counts and Markdown rendering', async () => {
   const r = await scanFile(p, opts());
   assert.equal(r.archive.extractedFiles, 1);
   assert.ok(toMarkdown(r).includes('``` ticks.zip!/a``b`c.ps1 ```'), 'code fence is longer than any backtick run in the name');
+});
+
+/**
+ * Minimal PE32 image with one section that holds a single debug directory entry.
+ * `debugType` 16 marks a deterministic (/Brepro) build; 2 is a plain CodeView entry.
+ */
+function buildPe({ timestamp, debugType }) {
+  const buf = Buffer.alloc(0x400);
+  buf.write('MZ', 0, 'latin1');
+  buf.writeUInt32LE(0x40, 0x3c);
+  buf.write('PE\0\0', 0x40, 'latin1');
+  const coff = 0x44;
+  buf.writeUInt16LE(0x14c, coff); // i386
+  buf.writeUInt16LE(1, coff + 2); // one section
+  buf.writeUInt32LE(timestamp, coff + 4);
+  buf.writeUInt16LE(0xe0, coff + 16); // optional header size
+  buf.writeUInt16LE(0x0102, coff + 18); // executable, 32-bit
+  const opt = coff + 20;
+  buf.writeUInt16LE(0x10b, opt); // PE32
+  buf.writeUInt32LE(0x1000, opt + 16); // entry point
+  buf.writeUInt32LE(0x400000, opt + 28); // image base
+  buf.writeUInt32LE(0x1000, opt + 32); // section alignment
+  buf.writeUInt32LE(0x200, opt + 36); // file alignment
+  buf.writeUInt16LE(3, opt + 68); // console subsystem
+  buf.writeUInt16LE(0x0140, opt + 70); // ASLR + NX
+  buf.writeUInt32LE(16, opt + 92); // data directories
+  buf.writeUInt32LE(0x1000, opt + 96 + 6 * 8); // debug directory RVA
+  buf.writeUInt32LE(28, opt + 96 + 6 * 8 + 4); // one entry
+  const sec = opt + 0xe0;
+  buf.write('.text', sec, 'latin1');
+  buf.writeUInt32LE(0x200, sec + 8); // virtual size
+  buf.writeUInt32LE(0x1000, sec + 12); // virtual address
+  buf.writeUInt32LE(0x200, sec + 16); // raw size
+  buf.writeUInt32LE(0x200, sec + 20); // raw pointer
+  buf.writeUInt32LE(0x60000020, sec + 36); // code, execute, read
+  buf.writeUInt32LE(debugType, 0x200 + 12);
+  return buf;
+}
+
+test('deterministic builds do not get the "future timestamp" finding', async () => {
+  const future = Math.floor(Date.now() / 1000) + 50 * 365 * 86400;
+  const repro = buildPe({ timestamp: future, debugType: 16 });
+  const plain = buildPe({ timestamp: future, debugType: 2 });
+  const pe = parsePEBuffer(repro);
+  assert.ok(pe.valid, JSON.stringify(pe.errors));
+  assert.deepEqual(pe.debugTypes, [16]);
+  assert.equal(pe.reproducible, true);
+  assert.equal(parsePEBuffer(plain).reproducible, false);
+
+  await fs.writeFile(path.join(dir, 'repro.exe'), repro);
+  await fs.writeFile(path.join(dir, 'forged.exe'), plain);
+  assert.ok(!ids(await scanFile(path.join(dir, 'repro.exe'), opts())).has('integrity.future-timestamp'));
+  assert.ok(ids(await scanFile(path.join(dir, 'forged.exe'), opts())).has('integrity.future-timestamp'), 'a forged date without a Repro entry is still reported');
+});
+
+test('version numbers and certificate OIDs are not reported as IPv4 addresses', () => {
+  const ips = (text) => scanIocs(text).find((x) => x.rule.id === 'ioc.ipv4')?.matches ?? [];
+  const text = [
+    'C2 server 45.33.12.7',
+    'connect("185.220.101.4")',
+    'Common utilities\n7.11.0.24\nFileVersion\n7.11.0.24', // version resource
+    'Assembly, Version=4.2.1.5',
+    'jdk 21.0.8.0', // ends in .0: never a host address
+    'oids 2.5.29.17 2.5.4.10 1.3.101.112',
+    '1.2.3.4',
+  ].join('\n');
+  assert.deepEqual(ips(text), ['45.33.12.7', '185.220.101.4']);
 });

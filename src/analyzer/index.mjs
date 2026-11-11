@@ -895,7 +895,8 @@ function peFindings(pe, file) {
     out.push(mk('obfuscation.overlay', 'obfuscation', pe.overlay.entropy > 7.5 ? 'medium' : 'low', 'Large overlay data', `${(pe.overlay.size / 1024 / 1024).toFixed(2)} MiB of data is appended after the last section (entropy ${pe.overlay.entropy.toFixed(2)}). Installers do this legitimately; droppers hide payloads there.`, file));
   }
   const now = Date.now() / 1000;
-  if (pe.timestamp && pe.timestamp > now + 86400 * 2) {
+  // Deterministic builds store a hash in the timestamp field, so "future" dates are expected there.
+  if (pe.timestamp && pe.timestamp > now + 86400 * 2 && !pe.reproducible) {
     out.push(mk('integrity.future-timestamp', 'integrity', 'low', 'Compile timestamp in the future', `Header claims ${pe.timestampIso}; the timestamp was forged.`, file));
   }
   if (!pe.dllCharacteristics.aslr || !pe.dllCharacteristics.dep) {

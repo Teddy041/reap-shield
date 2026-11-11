@@ -286,6 +286,7 @@ npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
 npx reap-shield rules update --package core
 npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
 ```
 
 | Option | Meaning |
@@ -423,6 +424,7 @@ reap-shield/
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
 │   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
+│   │   ├── benchmark.mjs        Detection benchmark: labelled corpus, metrics and report
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -454,6 +456,7 @@ The suites build every fixture at runtime and cover:
 - **Detection:** insecure Electron ASAR, Python dropper patterns, the MS-OVBA decompressor.
 - **Reporting:** scoring and HTML / Markdown escaping of untrusted content.
 - **YARA:** custom-rule matches with evidence, private and broken rules, archive contents, the score-to-severity mapping and the YARA Forge updater (with a mocked download).
+- **Benchmark:** corpus collection (deduplication, seeded sampling, label conflicts), confusion-matrix metrics, per-sample error handling and an end-to-end run on synthetic samples.
 
 The fixtures contain suspicious *strings and structures only*. **None of them is functional malware.**
 
@@ -463,6 +466,34 @@ Smoke-test the real desktop app end to end. This renders the UI, checks renderer
 npm run build:ui
 REAP_SMOKE_TEST=/path/to/sample.zip REAP_SMOKE_PDF=/tmp/report.pdf npx electron .
 ```
+
+### Detection benchmark
+
+```bash
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
+npx reap-shield bench --clean "C:/Windows/System32" --ext exe,dll --limit 300 --max-fp 2
+```
+
+Measure how well REAP-Shield separates malicious from clean files on **your own labelled corpus**. Every sample goes through the normal static pipeline (nothing is executed), and the run writes `benchmark.md` and `benchmark.json`:
+
+- **Metrics:** detection rate (recall), false positive rate, precision and F1 at the `--threshold` level, plus a table for every threshold (*Medium+*, *High+*, *Critical+*).
+- **Breakdowns:** verdict distribution per label, results per file type, the rules that fire most on clean files (false-positive sources) and the rules seen only on malicious files.
+- **Lists:** every missed malicious sample and every false positive, with type, size, score and SHA-256. Missed samples are the most useful input for new rules.
+- **Corpus handling:** folders are walked recursively; empty files, exact duplicates (SHA-256) and files labelled both ways are skipped and counted. `--limit` with `--seed` picks a reproducible random subset; `--ext` keeps only the given extensions.
+- **CI gates:** `--min-detection <%>` and `--max-fp <%>` make the command exit with code `1` when a rate gets worse.
+
+| Option | Meaning |
+| --- | --- |
+| `--malicious <path>` | File or folder of known-malicious samples (repeatable) |
+| `--clean <path>` | File or folder of known-clean samples (repeatable) |
+| `--threshold <level>` | Lowest verdict counted as detected: `medium` (default), `high`, `critical` |
+| `--ext <list>` | Only use these extensions, e.g. `exe,dll,ps1` |
+| `--limit <n>` | At most *n* samples per label (seeded random subset, `--seed`) |
+| `--jobs <n>` | Samples scanned in parallel, 1 – 8 (default 1) |
+| `--min-detection <%>` / `--max-fp <%>` | Exit with code `1` when the detection rate is lower / the false positive rate is higher |
+| `-o, --output <dir>` | Output folder (default `temp/benchmark/<time>`) |
+
+> **Handle malware only inside an isolated virtual machine.** Collections such as MalwareBazaar ship samples in password-protected ZIP files: extract them inside the VM first, because encrypted archives are reported, not unpacked. If antivirus software quarantines a sample during the run, it is listed as an error and the run continues. A small or one-sided corpus gives misleading rates.
 
 ---
 
@@ -499,6 +530,7 @@ Helper scripts:
 ## 🗺️ Roadmap
 
 - [x] YARA rule support and custom rule packs
+- [x] Detection benchmark on labelled corpora (detection and false positive rates)
 - [ ] Optional hash reputation lookups (opt-in, privacy-preserving)
 - [ ] Inno Setup and MSIX unpacking
 - [ ] .NET IL inspection via REA (`inspect-il`, `inspect-managed-artifact`)

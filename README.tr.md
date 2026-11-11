@@ -299,6 +299,7 @@ npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
 npx reap-shield rules update --package core
 npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
 ```
 
 | Seçenek | Anlamı |
@@ -441,6 +442,7 @@ reap-shield/
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
 │   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
+│   │   ├── benchmark.mjs        Detection benchmark: labelled corpus, metrics and report
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -473,6 +475,7 @@ Test paketleri tüm örnek dosyaları çalışma anında üretir ve şunları ka
 - **Tespit:** güvensiz Electron ASAR, Python dropper kalıpları, MS-OVBA açıcı.
 - **Raporlama:** puanlama ve güvenilmeyen içeriğin HTML / Markdown kaçışlanması.
 - **YARA:** kanıtlı özel kural eşleşmeleri, private ve hatalı kurallar, arşiv içerikleri, puan-şiddet eşlemesi ve YARA Forge güncelleyicisi (sahte bir indirmeyle).
+- **Benchmark:** örnek toplama (tekrar ayıklama, tohumlu örnekleme, çift etiket çakışmaları), karışıklık matrisi metrikleri, örnek bazında hata yönetimi ve sentetik örneklerle uçtan uca çalıştırma.
 
 Örnek dosyalar sadece şüpheli *metinler ve yapılar* içerir. **Hiçbiri çalışan bir zararlı yazılım değildir.**
 
@@ -482,6 +485,34 @@ Gerçek masaüstü uygulamasını uçtan uca test etmek için smoke testi çalı
 npm run build:ui
 REAP_SMOKE_TEST=/path/to/sample.zip REAP_SMOKE_PDF=/tmp/report.pdf npx electron .
 ```
+
+### Tespit benchmark’ı
+
+```bash
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
+npx reap-shield bench --clean "C:/Windows/System32" --ext exe,dll --limit 300 --max-fp 2
+```
+
+REAP-Shield’in zararlı ve temiz dosyaları ne kadar iyi ayırdığını **kendi etiketli örnek setinizle** ölçün. Her örnek normal statik analizden geçer (hiçbir şey çalıştırılmaz) ve sonuçlar `benchmark.md` ile `benchmark.json` dosyalarına yazılır:
+
+- **Metrikler:** `--threshold` seviyesinde tespit oranı (recall), yanlış alarm oranı, kesinlik (precision) ve F1; ayrıca her eşik için bir tablo (*Medium+*, *High+*, *Critical+*).
+- **Dökümler:** etikete göre karar dağılımı, dosya türüne göre sonuçlar, temiz dosyalarda en çok tetiklenen kurallar (yanlış alarm kaynakları) ve yalnızca zararlı dosyalarda görülen kurallar.
+- **Listeler:** kaçırılan her zararlı örnek ve her yanlış alarm; tür, boyut, skor ve SHA-256 ile. Kaçırılan örnekler yeni kurallar için en değerli girdidir.
+- **Örnek seti:** klasörler alt klasörleriyle taranır; boş dosyalar, birebir aynı dosyalar (SHA-256) ve iki etiketle de verilen dosyalar atlanır ve sayılır. `--limit` ve `--seed` tekrarlanabilir rastgele bir alt küme seçer; `--ext` yalnızca verilen uzantıları kullanır.
+- **CI kapıları:** `--min-detection <%>` ve `--max-fp <%>`, oranlar kötüleştiğinde komutun `1` koduyla çıkmasını sağlar.
+
+| Seçenek | Anlamı |
+| --- | --- |
+| `--malicious <path>` | Bilinen zararlı örneklerin dosyası veya klasörü (tekrarlanabilir) |
+| `--clean <path>` | Bilinen temiz örneklerin dosyası veya klasörü (tekrarlanabilir) |
+| `--threshold <level>` | Tespit sayılan en düşük karar: `medium` (varsayılan), `high`, `critical` |
+| `--ext <list>` | Yalnızca bu uzantılar, ör. `exe,dll,ps1` |
+| `--limit <n>` | Etiket başına en fazla *n* örnek (tohumlu rastgele alt küme, `--seed`) |
+| `--jobs <n>` | Paralel taranan örnek sayısı, 1 – 8 (varsayılan 1) |
+| `--min-detection <%>` / `--max-fp <%>` | Tespit oranı daha düşük / yanlış alarm oranı daha yüksek olursa `1` koduyla çıkar |
+| `-o, --output <dir>` | Çıktı klasörü (varsayılan `temp/benchmark/<zaman>`) |
+
+> **Zararlı yazılımları yalnızca izole bir sanal makinede kullanın.** MalwareBazaar gibi koleksiyonlar örnekleri şifreli ZIP dosyalarında dağıtır: önce sanal makine içinde açın, çünkü şifreli arşivler açılmaz, yalnızca raporlanır. Antivirüs bir örneği çalışma sırasında karantinaya alırsa örnek hata olarak listelenir ve çalışma devam eder. Küçük veya tek taraflı bir örnek seti yanıltıcı oranlar verir.
 
 ---
 
@@ -521,6 +552,7 @@ Yardımcı betikler:
 ## 🗺️ Yol Haritası
 
 - [x] YARA kural desteği ve özel kural paketleri
+- [x] Etiketli örnek setleriyle tespit benchmark’ı (tespit ve yanlış alarm oranları)
 - [ ] İsteğe bağlı hash itibar sorguları (kullanıcı açarsa, gizliliği koruyan)
 - [ ] Inno Setup ve MSIX açma
 - [ ] REA üzerinden .NET IL incelemesi (`inspect-il`, `inspect-managed-artifact`)

@@ -84,7 +84,7 @@ const PAYLOAD_HOSTS = /(pastebin\.com|paste\.ee|hastebin\.com|ghostbin|rentry\.c
  * @property {'info'|'low'|'medium'|'high'|'critical'} severity
  * @property {string} title
  * @property {string} description
- * @property {(m: string) => boolean} [keep]  Extra filter.
+ * @property {(m: string, text: string, index: number) => boolean} [keep]  Extra filter (match, corpus, match offset).
  * @property {(m: string) => string} [redact] Masking for secrets in reports.
  */
 
@@ -151,7 +151,7 @@ export const IOC_RULES = [
     title: 'Hard-coded public IPv4 address',
     description: 'Public IP addresses embedded in the file. Many are benign (DNS resolvers, version strings).',
     re: /(?<![\d.])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)(?![\d.])/g,
-    keep: (m) => isPublicIPv4(m) && !/^(?:\d\.){3}\d$/.test(m), // skip "1.2.3.4"-style version numbers
+    keep: (m, text = '') => isPublicIPv4(m) && !looksLikeVersionOrOid(m, text),
   },
   {
     id: 'ioc.url', category: 'network', severity: 'info',
@@ -296,6 +296,26 @@ export function isPublicIPv4(ip) {
   return true;
 }
 
+/** X.500 / PKIX object identifiers with exactly four arcs (certificate parsers embed many). */
+const FOUR_ARC_OID = /^(?:2\.5\.(?:4|6|29)\.\d+|1\.3\.(?:6|14|101)\.\d+|1\.2\.840\.\d+)$/;
+/** A version label right before a value ("Version=", "FileVersion", "ver", "v"). */
+const VERSION_LABEL = String.raw`(?:version|\bver|\bv)[\s=:"'\0]{0,4}`;
+
+/**
+ * Dotted quads that are almost certainly not IP addresses: "1.2.3.4"-style version
+ * numbers (all single digits), versions such as "15.0.0.0" or "21.0.8.0" (a host address
+ * never ends in .0), certificate OIDs, and values that appear anywhere in the corpus right
+ * after a version label (e.g. the "FileVersion" entry of a PE version resource).
+ * @param {string} m     the dotted quad
+ * @param {string} text  the corpus the value was found in
+ */
+export function looksLikeVersionOrOid(m, text = '') {
+  if (/^(?:\d\.){3}\d$/.test(m)) return true;
+  if (m.endsWith('.0')) return true;
+  if (FOUR_ARC_OID.test(m)) return true;
+  return new RegExp(`${VERSION_LABEL}${m.replace(/\./g, '\\.')}(?![\\d.])`, 'i').test(text);
+}
+
 /**
  * Run all IOC rules on a text corpus.
  * @returns {Array<{rule: IocRule, matches: string[]}>}
@@ -314,7 +334,7 @@ export function scanIocs(text, maxMatchesPerRule = 25) {
         continue;
       }
       const value = m[0].replace(/[.,;)\]}>'"]+$/, '');
-      if (rule.keep && !rule.keep(value)) continue;
+      if (rule.keep && !rule.keep(value, text, m.index)) continue;
       seen.add(value);
       if (seen.size >= maxMatchesPerRule) break;
     }

@@ -299,6 +299,7 @@ npx reap-shield scan sample.exe --provider ghidra --keep-sandbox
 npx reap-shield rules update --package core
 npx reap-shield scan sample.exe --yara-rules ./my-rules
 npx reap-shield doctor
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
 ```
 
 | Option | Bedeutung |
@@ -441,6 +442,7 @@ reap-shield/
 │   │   ├── scripts.mjs          JS / Python / PowerShell / VBA / Electron IPC rules
 │   │   ├── signature.mjs        Authenticode verification (batched PowerShell)
 │   │   ├── yara.mjs             YARA-X rule loading, matching and YARA Forge updates
+│   │   ├── benchmark.mjs        Detection benchmark: labelled corpus, metrics and report
 │   │   ├── hashing.mjs          Streaming MD5 / SHA-1 / SHA-256 + entropy
 │   │   ├── rea.mjs              REA CLI bridge (locate, run, normalise evidence)
 │   │   ├── scoring.mjs          Threat score and verdict
@@ -473,6 +475,7 @@ Die Testsuiten erzeugen alle Testdateien zur Laufzeit und decken ab:
 - **Erkennung:** unsichere Electron-ASAR, Python-Dropper-Muster, der MS-OVBA-Dekompressor.
 - **Berichte:** Bewertung sowie HTML-/Markdown-Maskierung nicht vertrauenswürdiger Inhalte.
 - **YARA:** Treffer eigener Regeln mit Belegen, private und fehlerhafte Regeln, Archivinhalte, die Zuordnung von Score zu Schweregrad und der YARA-Forge-Updater (mit simuliertem Download).
+- **Benchmark:** Korpus-Erfassung (Duplikate, reproduzierbare Stichprobe, widersprüchliche Labels), Kennzahlen der Konfusionsmatrix, Fehlerbehandlung pro Probe und ein End-to-End-Lauf mit synthetischen Proben.
 
 Die Testdateien enthalten nur verdächtige *Zeichenketten und Strukturen*. **Keine davon ist funktionsfähige Malware.**
 
@@ -482,6 +485,34 @@ End-to-End-Smoke-Test der echten Desktop-App. Er rendert die Oberfläche, prüft
 npm run build:ui
 REAP_SMOKE_TEST=/path/to/sample.zip REAP_SMOKE_PDF=/tmp/report.pdf npx electron .
 ```
+
+### Erkennungs-Benchmark
+
+```bash
+npx reap-shield bench --malicious ./corpus/malicious --clean ./corpus/clean --limit 500 --jobs 4
+npx reap-shield bench --clean "C:/Windows/System32" --ext exe,dll --limit 300 --max-fp 2
+```
+
+Messen Sie, wie gut REAP-Shield bösartige und saubere Dateien in **Ihrem eigenen gelabelten Korpus** trennt. Jede Probe durchläuft die normale statische Analyse (nichts wird ausgeführt); das Ergebnis wird in `benchmark.md` und `benchmark.json` geschrieben:
+
+- **Kennzahlen:** Erkennungsrate (Recall), Falsch-Positiv-Rate, Präzision und F1 auf der `--threshold`-Stufe, dazu eine Tabelle für jede Schwelle (*Medium+*, *High+*, *Critical+*).
+- **Aufschlüsselungen:** Verteilung der Urteile pro Label, Ergebnisse pro Dateityp, die Regeln, die am häufigsten bei sauberen Dateien anschlagen (Falsch-Positiv-Quellen), und Regeln, die nur bei bösartigen Dateien vorkommen.
+- **Listen:** jede verpasste bösartige Probe und jeder Fehlalarm mit Typ, Größe, Score und SHA-256. Verpasste Proben sind die wertvollste Grundlage für neue Regeln.
+- **Korpus:** Ordner werden rekursiv durchsucht; leere Dateien, exakte Duplikate (SHA-256) und doppelt gelabelte Dateien werden übersprungen und gezählt. `--limit` mit `--seed` wählt eine reproduzierbare Zufallsauswahl; `--ext` beschränkt auf die angegebenen Endungen.
+- **CI-Gates:** `--min-detection <%>` und `--max-fp <%>` lassen den Befehl mit Code `1` enden, wenn sich eine Rate verschlechtert.
+
+| Option | Bedeutung |
+| --- | --- |
+| `--malicious <path>` | Datei oder Ordner mit bekannten bösartigen Proben (wiederholbar) |
+| `--clean <path>` | Datei oder Ordner mit bekannten sauberen Proben (wiederholbar) |
+| `--threshold <level>` | Niedrigstes Urteil, das als erkannt zählt: `medium` (Standard), `high`, `critical` |
+| `--ext <list>` | Nur diese Endungen, z. B. `exe,dll,ps1` |
+| `--limit <n>` | Höchstens *n* Proben pro Label (reproduzierbare Zufallsauswahl, `--seed`) |
+| `--jobs <n>` | Parallel gescannte Proben, 1 – 8 (Standard 1) |
+| `--min-detection <%>` / `--max-fp <%>` | Exit-Code `1`, wenn die Erkennungsrate niedriger / die Falsch-Positiv-Rate höher ist |
+| `-o, --output <dir>` | Ausgabeordner (Standard `temp/benchmark/<Zeit>`) |
+
+> **Malware nur in einer isolierten virtuellen Maschine verwenden.** Sammlungen wie MalwareBazaar liefern Proben in passwortgeschützten ZIP-Dateien: Entpacken Sie sie zuerst in der VM, denn verschlüsselte Archive werden nur gemeldet, nicht entpackt. Stellt eine Antivirensoftware eine Probe während des Laufs unter Quarantäne, wird sie als Fehler gelistet und der Lauf geht weiter. Ein kleiner oder einseitiger Korpus liefert irreführende Raten.
 
 ---
 
@@ -521,6 +552,7 @@ Hilfsskripte:
 ## 🗺️ Roadmap
 
 - [x] Unterstützung für YARA-Regeln und eigene Regelpakete
+- [x] Erkennungs-Benchmark mit gelabelten Korpora (Erkennungs- und Falsch-Positiv-Rate)
 - [ ] Optionale Hash-Reputationsabfragen (Opt-in, datenschutzfreundlich)
 - [ ] Entpacken von Inno Setup und MSIX
 - [ ] .NET-IL-Analyse über REA (`inspect-il`, `inspect-managed-artifact`)
