@@ -401,12 +401,14 @@ export async function updateForgeRules({ pkg = FORGE_DEFAULT_PACKAGE, fetchImpl 
 
   const { forge } = yaraDirs();
   await fsp.mkdir(forge, { recursive: true });
-  for (const name of await fsp.readdir(forge)) {
-    if (RULE_FILE_RE.test(name)) await fsp.rm(path.join(forge, name), { force: true });
-  }
+  // Write the new package first and only then remove the previous one, so a failed write
+  // (full disk, locked file) never leaves the user without any rules.
   const target = path.join(forge, `yara-forge-rules-${pkg}.yar`);
   await fsp.writeFile(`${target}.tmp`, text, 'utf8');
   await fsp.rename(`${target}.tmp`, target);
+  for (const name of await fsp.readdir(forge)) {
+    if (RULE_FILE_RE.test(name) && name !== path.basename(target)) await fsp.rm(path.join(forge, name), { force: true });
+  }
   const header = parseForgeHeader(text);
   const info = {
     package: pkg,

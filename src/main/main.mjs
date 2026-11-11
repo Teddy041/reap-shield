@@ -63,7 +63,8 @@ app.enableSandbox();
 function isTrustedSender(event) {
   const url = event.senderFrame?.url ?? '';
   if (DEV_URL) return url.startsWith(DEV_URL);
-  return url.startsWith(pathToFileURL(path.join(ROOT, 'dist', 'ui')).href);
+  // The trailing slash keeps a sibling folder such as "dist/ui-other" from matching the prefix.
+  return url.startsWith(`${pathToFileURL(path.join(ROOT, 'dist', 'ui')).href}/`);
 }
 
 function handle(channel, fn) {
@@ -223,7 +224,11 @@ handle('scan:start', async (event, filePath, options = {}) => {
       }
     };
     const onError = (err) => {
+      // A crashed worker never reaches its own cleanup; "exit" is no longer listened to
+      // after finish(), so the sandbox of the failed scan is removed here.
+      const dir = activeScan?.sandboxDir;
       finish();
+      if (dir) removeSandboxDir(dir, SANDBOX_ROOT);
       reject(err);
     };
     const onExit = (code) => {

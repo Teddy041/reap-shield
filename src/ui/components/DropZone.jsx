@@ -32,7 +32,15 @@ export default function DropZone({ onFile, disabled }) {
       onDragLeave={() => setOver(false)}
       onDrop={onDrop}
       onClick={browse}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && browse()}
+      onKeyDown={(e) => {
+        // Only keys pressed on the drop zone itself: Enter on the inner "Scan a folder" button
+        // bubbles up here and would otherwise open the file dialog on top of the folder dialog.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          browse();
+        }
+      }}
       role="button"
       tabIndex={0}
       aria-label="Drop a file here or press Enter to browse"

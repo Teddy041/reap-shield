@@ -142,14 +142,6 @@ const PDF_KEYWORDS = [
  */
 export function analyzePdf(buf, limits = { maxDecoded: 64 * 1024 * 1024, maxStreams: 4000 }) {
   const latin = buf.toString('latin1');
-  const keywords = {};
-  for (const [kw] of PDF_KEYWORDS) {
-    // Match the name token, including hex-escaped obfuscation such as /J#61vaScript.
-    const pattern = kw.slice(1).split('').map((ch) => `(?:${ch}|#${ch.charCodeAt(0).toString(16)})`).join('');
-    const re = new RegExp(`/${pattern}(?![A-Za-z0-9])`, 'gi');
-    keywords[kw] = (latin.match(re) ?? []).length;
-  }
-  const obfuscatedNames = (latin.match(/\/[A-Za-z]*#[0-9a-f]{2}[A-Za-z#0-9]*/gi) ?? []).length;
   const encrypted = /\/Encrypt\b/.test(latin);
 
   const decodedParts = [];
@@ -185,6 +177,21 @@ export function analyzePdf(buf, limits = { maxDecoded: 64 * 1024 * 1024, maxStre
     }
     streamRe.lastIndex = end + 9;
   }
+  // Names are counted in the raw file and in the decoded streams: PDF 1.5+ documents keep
+  // most objects (catalog, actions, JavaScript dictionaries) inside compressed object
+  // streams, where a search of the raw bytes alone finds nothing.
+  const searchable = decodedParts.length > 0 ? `${latin}\n${decodedParts.join('\n')}` : latin;
+  const keywords = {};
+  for (const [kw] of PDF_KEYWORDS) {
+    // Match the name token, including hex-escaped obfuscation such as /J#61vaScript.
+    const pattern = kw.slice(1).split('').map((ch) => `(?:${ch}|#${ch.charCodeAt(0).toString(16)})`).join('');
+    const re = new RegExp(`/${pattern}(?![A-Za-z0-9])`, 'gi');
+    keywords[kw] = (searchable.match(re) ?? []).length;
+  }
+  // Only escapes of letters and digits count: they never need escaping, so writing them as
+  // #xx is deliberate. Escaped spaces and punctuation (/Times#20New#20Roman) are normal.
+  const obfuscatedNames = (searchable.match(/\/[A-Za-z0-9#]*#(?:3[0-9]|[46][1-9a-f]|[57][0-9a])[A-Za-z0-9#]*/gi) ?? []).length;
+
   // Attachment file names (/F (name) or /UF (name)) next to /Filespec dictionaries.
   const names = [...latin.matchAll(/\/Type\s*\/Filespec[^>]{0,400}?\/(?:UF|F)\s*\(([^)]{1,200})\)/g)].map((x) => x[1]);
   embedded.forEach((e, i) => {

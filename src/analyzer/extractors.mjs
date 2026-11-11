@@ -17,18 +17,25 @@ import * as tar from 'tar';
 import { createExtractorFromData } from 'node-unrar-js';
 import { createRequire } from 'node:module';
 import { LIMITS } from './config.mjs';
-import { SandboxLimitError } from './sandbox.mjs';
+import { SandboxLimitError, uniqueName } from './sandbox.mjs';
 import { SEVENZIP_KINDS } from './fileType.mjs';
 
 /**
  * @typedef {object} ExtractionResult
  * @property {string[]} files      Absolute paths of extracted regular files.
  * @property {string[]} warnings   Human-readable notes (skipped entries etc.).
- * @property {{encrypted:number, symlinks:number, unsafePaths:number, bombSuspects:number}} stats
+ * @property {{encrypted:number, symlinks:number, unsafePaths:number, bombSuspects:number, oversized:number, truncated:number}} stats
+ *   oversized: entries above the per-file limit that were skipped (the rest was still unpacked).
+ *   truncated: non-zero when extraction stopped early at a sandbox limit, so later entries were not unpacked.
  */
 
 function newResult() {
-  return { files: [], warnings: [], stats: { encrypted: 0, symlinks: 0, unsafePaths: 0, bombSuspects: 0 } };
+  return { files: [], warnings: [], stats: { encrypted: 0, symlinks: 0, unsafePaths: 0, bombSuspects: 0, oversized: 0, truncated: 0 } };
+}
+
+function skipOversized(result, name, size) {
+  result.stats.oversized += 1;
+  result.warnings.push(`Skipped entry above the per-file limit of ${LIMITS.maxEntryBytes} bytes: ${name} (${size} bytes)`);
 }
 
 /** Byte-counting transform that aborts when a stream exceeds its budget. */
@@ -67,12 +74,17 @@ export function extractZip(archivePath, destDir, sandbox) {
       (openErr, zip) => {
         if (openErr) return reject(new Error(`Malformed ZIP: ${openErr.message}`));
         let stopped = false;
+        /** Targets already written, lower-cased: NTFS and APFS are case-insensitive by default. */
+        const taken = new Set();
         const stop = (err) => {
           if (stopped) return;
           stopped = true;
           zip.close();
           if (err && !(err instanceof SandboxLimitError)) return reject(err);
-          if (err) result.warnings.push(err.message);
+          if (err) {
+            result.stats.truncated += 1;
+            result.warnings.push(err.message);
+          }
           resolve(result);
         };
 
@@ -97,10 +109,15 @@ export function extractZip(archivePath, destDir, sandbox) {
               result.warnings.push(`Skipped password-protected entry: ${name}`);
               return zip.readEntry();
             }
-            const target = sandbox.safeJoin(destDir, name);
+            let target = sandbox.safeJoin(destDir, name);
             if (!target) {
               result.stats.unsafePaths += 1;
               result.warnings.push(`Blocked path traversal attempt: ${name}`);
+              return zip.readEntry();
+            }
+            // One oversized entry must not hide the entries that follow it.
+            if (entry.uncompressedSize > LIMITS.maxEntryBytes) {
+              skipOversized(result, name, entry.uncompressedSize);
               return zip.readEntry();
             }
             const ratio = entry.compressedSize > 0 ? entry.uncompressedSize / entry.compressedSize : 0;
@@ -109,6 +126,13 @@ export function extractZip(archivePath, destDir, sandbox) {
               result.warnings.push(`Skipped entry with suspicious compression ratio ${ratio.toFixed(0)}:1 (${name})`);
               return zip.readEntry();
             }
+            // A second entry with the same name must not replace the first one: which of the
+            // two a victim's unpacker keeps depends on the tool, so both are kept and scanned.
+            if (taken.has(target.toLowerCase())) {
+              result.warnings.push(`Duplicate entry name, kept under a separate name: ${name}`);
+              target = uniqueName(target);
+            }
+            taken.add(target.toLowerCase());
             sandbox.reserve(0);
             await fsp.mkdir(path.dirname(target), { recursive: true });
             await new Promise((res, rej) => {
@@ -170,20 +194,53 @@ export async function extractTar(archivePath, destDir, sandbox) {
         result.warnings.push(`Blocked path traversal attempt: ${entryPath}`);
         return false;
       }
+      const size = entry?.size ?? 0;
+      if (size > LIMITS.maxEntryBytes) {
+        skipOversized(result, entryPath, size);
+        return false;
+      }
       try {
-        sandbox.reserve(entry?.size ?? 0);
+        sandbox.reserve(size);
       } catch (err) {
         budgetError ??= err;
         return false;
       }
-      result.files.push(safeTarget);
       return true;
     },
     onwarn: (_code, message) => result.warnings.push(`TAR: ${message}`),
   });
-  if (budgetError) result.warnings.push(budgetError.message);
-  result.files = (await Promise.all(result.files.map(async (f) => ((await isFile(f)) ? f : null)))).filter(Boolean);
+  if (budgetError) {
+    result.stats.truncated += 1;
+    result.warnings.push(budgetError.message);
+  }
+  // List what node-tar actually wrote instead of predicting its file names: on Windows it
+  // rewrites reserved characters (? : * | < > ") its own way, and a wrong prediction would
+  // silently drop that file from the scan.
+  result.files = await listRegularFiles(destDir);
   return result;
+}
+
+/** Regular files under `dir` (links are never followed or returned). */
+async function listRegularFiles(dir) {
+  const out = [];
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = await fsp.readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.isFile()) out.push(full);
+    }
+  }
+  return out;
 }
 
 /** Plain .gz (not a tarball): decompress the single stream with a size cap. */
@@ -260,10 +317,10 @@ export async function extractRar(archivePath, destDir, sandbox) {
     if (!file.extraction) continue;
     const target = sandbox.safeJoin(destDir, name);
     try {
-      await sandbox.writeBuffer(target, Buffer.from(file.extraction));
-      result.files.push(target);
+      result.files.push(await sandbox.writeBuffer(target, Buffer.from(file.extraction)));
     } catch (err) {
       if (err instanceof SandboxLimitError) {
+        result.stats.truncated += 1;
         result.warnings.push(err.message);
         break;
       }
@@ -330,7 +387,7 @@ export async function extractAsar(archivePath, destDir, sandbox) {
         }
         const size = Number(child?.size ?? 0);
         const offset = Number(child?.offset ?? NaN);
-        if (!Number.isFinite(offset) || size < 0 || dataOffset + offset + size > archiveSize) {
+        if (!Number.isFinite(offset) || !Number.isFinite(size) || offset < 0 || size < 0 || dataOffset + offset + size > archiveSize) {
           result.warnings.push(`Corrupt ASAR entry bounds: ${childRel}`);
           continue;
         }
@@ -340,13 +397,17 @@ export async function extractAsar(archivePath, destDir, sandbox) {
           result.warnings.push(`Blocked path traversal attempt: ${childRel}`);
           continue;
         }
+        if (size > LIMITS.maxEntryBytes) {
+          skipOversized(result, childRel, size);
+          continue;
+        }
         try {
           const buf = Buffer.alloc(size);
           if (size > 0) await fh.read(buf, 0, size, dataOffset + offset);
-          await sandbox.writeBuffer(target, buf);
-          result.files.push(target);
+          result.files.push(await sandbox.writeBuffer(target, buf));
         } catch (err) {
           if (err instanceof SandboxLimitError) {
+            result.stats.truncated += 1;
             result.warnings.push(err.message);
             return result;
           }
@@ -458,12 +519,14 @@ export async function extract7z(archivePath, destDir, sandbox, forcedType) {
         result.warnings.push(`Blocked path traversal attempt: ${rel}`);
         continue;
       }
+      // Already counted and reported from the listing; skipping it keeps the rest of the archive.
+      if (st.size > LIMITS.maxEntryBytes) continue;
       try {
-        await sandbox.writeBuffer(target, Buffer.from(FS.readFile(full)));
-        result.files.push(target);
+        result.files.push(await sandbox.writeBuffer(target, Buffer.from(FS.readFile(full))));
         FS.unlink(full); // free WASM memory as we go
       } catch (err) {
         if (err instanceof SandboxLimitError) {
+          result.stats.truncated += 1;
           result.warnings.push(err.message);
           return result;
         }
@@ -523,14 +586,6 @@ function parseSlt(lines) {
     }
   }
   return entries;
-}
-
-async function isFile(p) {
-  try {
-    return (await fsp.lstat(p)).isFile();
-  } catch {
-    return false;
-  }
 }
 
 /** Dispatch by detected kind. */

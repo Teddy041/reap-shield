@@ -13,14 +13,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { CATEGORIES, LIMITS, SEVERITIES, formatBytes } from './config.mjs';
+import { CATEGORIES, LIMITS, SEVERITIES, SCRIPT_EXTENSIONS, formatBytes } from './config.mjs';
 import { Sandbox, guard } from './sandbox.mjs';
-import { detectFileType, isArchiveKind } from './fileType.mjs';
+import { detectFileType, isArchiveKind, headLooksTextual } from './fileType.mjs';
 import { extractArchive, extract7z } from './extractors.mjs';
 import { hashFile } from './hashing.mjs';
 import { parsePE, parsePEBuffer } from './pe.mjs';
 import { parseLnk, lnkFindings, analyzePdf, extractVbaSources } from './documents.mjs';
-import { readCapped, extractStrings, scanIocs } from './strings.mjs';
+import { readCapped, extractStrings, scanIocs, decodeText } from './strings.mjs';
 import { API_COMBOS, lookupApi } from './apiCatalog.mjs';
 import { scanScript, scriptLang, looksLikeElectron, scriptShape } from './scripts.mjs';
 import {
@@ -121,6 +121,10 @@ export async function scanFile(inputPath, options = {}) {
     }
     let archiveIndex = 0;
     while (queue.length > 0) {
+      if (inventory.length >= LIMITS.maxAnalyzedFiles) {
+        archiveWarnings.push(`More than ${LIMITS.maxAnalyzedFiles} files; the rest were not analyzed.`);
+        break;
+      }
       const item = queue.shift();
       const typeRes = await guard(`Type detection failed for ${item.rel}`, () => detectFileType(item.abs));
       if (!typeRes.ok) {
@@ -129,10 +133,6 @@ export async function scanFile(inputPath, options = {}) {
       }
       item.type = typeRes.value;
       inventory.push(item);
-      if (inventory.length > LIMITS.maxAnalyzedFiles) {
-        archiveWarnings.push(`More than ${LIMITS.maxAnalyzedFiles} files; the rest were not analyzed.`);
-        break;
-      }
       // Payloads hidden inside executables and documents become nested items too.
       if ((item.type.kind === 'pe' || item.type.kind === 'pdf') && item.depth < LIMITS.maxNestingDepth) {
         archiveIndex += 1;
@@ -161,7 +161,10 @@ export async function scanFile(inputPath, options = {}) {
         continue;
       }
       const { files, warnings, stats } = ex.value;
+      item.unpacked = files.length > 0;
       archiveWarnings.push(...warnings.map((w) => `${item.rel}: ${w}`));
+      if (stats.truncated > 0) findings.push(mk('archive.truncated', 'archive', 'high', 'Archive only partly unpacked (safety limit reached)', `Extraction stopped at a sandbox limit (${LIMITS.maxEntries} entries, ${formatBytes(LIMITS.maxExtractedTotalBytes)} in total). The remaining entries were not inspected, so they may hide content from this scan.`, item.rel));
+      if (stats.oversized > 0) findings.push(mk('archive.oversized-entry', 'archive', 'medium', 'Oversized archive entries were not inspected', `${stats.oversized} entr${stats.oversized === 1 ? 'y is' : 'ies are'} larger than the ${formatBytes(LIMITS.maxEntryBytes)} per-file limit and ${stats.oversized === 1 ? 'was' : 'were'} skipped; the other entries were unpacked and scanned.`, item.rel));
       if (stats.unsafePaths > 0) findings.push(mk('archive.path-traversal', 'archive', 'high', 'Path traversal entries in archive', `${stats.unsafePaths} entr${stats.unsafePaths === 1 ? 'y tries' : 'ies try'} to write outside the extraction folder (zip-slip). They were blocked.`, item.rel));
       if (stats.encrypted > 0) findings.push(mk('archive.encrypted', 'archive', 'medium', 'Password-protected content', `${stats.encrypted} encrypted entr${stats.encrypted === 1 ? 'y' : 'ies'} could not be inspected. Malware is often shipped in password-protected archives to evade scanners.`, item.rel));
       if (stats.bombSuspects > 0) findings.push(mk('archive.bomb', 'archive', 'high', 'Decompression bomb characteristics', `${stats.bombSuspects} entr${stats.bombSuspects === 1 ? 'y has' : 'ies have'} an extreme compression ratio and were skipped.`, item.rel));
@@ -208,18 +211,46 @@ export async function scanFile(inputPath, options = {}) {
       }
       if (sig.status === 'Valid') trustedSignature = true;
     }
+    const peCount = inventory.filter((x) => x.type.kind === 'pe').length;
     /** Files whose Authenticode signature Windows reports as Valid. */
     const signedFiles = new Set();
     /** REA spawns several processes per PE; cap how many PE files get the REA pass. */
     let reaPeBudget = 25;
     const fileSummaries = [];
 
+    /** Script / markup / text rules + IoC search. `textKind` is 'script', 'json' or 'text'. */
+    const analyzeText = async (item, summary, textKind) => {
+      const { buf, truncated } = await readCapped(item.abs, LIMITS.maxScriptBytes);
+      // BOM-aware: PowerShell, batch and Windows Script Host files are often UTF-16.
+      const text = decodeText(buf);
+      const ext = item.type.ext;
+      const lang = textKind === 'text' ? 'other' : scriptLang(ext);
+      const shape = scriptShape(text);
+      summary.script = { lang, lines: shape.lines, minified: shape.minified, truncated };
+      const ctx = { electron: electronApp || looksLikeElectron(text) };
+      pushScriptHits(findings, scanScript(text, lang, ctx), item.rel);
+      findings.push(...iocFindings(scanIocs(text), item.rel));
+      if (['.jse', '.vbe'].includes(ext) || /#@~\^/.test(text.slice(0, 4096))) {
+        findings.push(mk('script.encoded-file', 'obfuscation', 'high', 'Encoded Windows script file', 'JSE / VBE files are encoded with the Microsoft Script Encoder; legitimate software almost never ships them.', item.rel));
+      }
+    };
+    /** True when a file that merely starts with a container / executable magic is really text. */
+    const reallyText = async (item) => SCRIPT_EXTENSIONS.has(item.type.ext) || (await headLooksTextual(item.abs).catch(() => false));
+
     for (const [i, item] of inventory.entries()) {
       const pct = 30 + (55 * i) / Math.max(1, inventory.length);
-      const kind = item.type.kind;
+      let kind = item.type.kind;
       const summary = { rel: item.rel, kind, label: item.type.label, size: item.type.size, depth: item.depth, ...pickHashes(item.hashes) };
       fileSummaries.push(summary);
-      if (isArchiveKind(kind) || kind === 'empty') continue;
+      if (kind === 'empty') continue;
+      if (isArchiveKind(kind)) {
+        if (item.unpacked) continue;
+        // Nothing came out of it (corrupt, encrypted, too deeply nested, or a script that only
+        // starts with archive magic bytes so that scanners treat it as a broken archive):
+        // analyze the raw bytes instead of skipping the file unseen.
+        kind = (await reallyText(item)) ? 'script' : 'binary';
+        summary.analyzedAs = kind;
+      }
 
       progress('analyze', `Analyzing ${item.rel}`, pct);
 
@@ -228,6 +259,13 @@ export async function scanFile(inputPath, options = {}) {
           const pe = await parsePE(item.abs);
           summary.pe = peSummary(pe);
           findings.push(...peFindings(pe, item.rel));
+          // "MZ" followed by script text is not an executable: cmd.exe and the script hosts
+          // skip the bogus first line and run the rest, so apply the script rules to it.
+          if (!pe.valid && (await reallyText(item))) {
+            summary.analyzedAs = 'script';
+            await analyzeText(item, summary, 'script');
+            return;
+          }
           let imports = pe.imports;
 
           if (reaAvailable && reaPeBudget > 0) {
@@ -263,7 +301,7 @@ export async function scanFile(inputPath, options = {}) {
             const sig = signatures.get(path.resolve(item.abs)) ?? null;
             if (sig) {
               summary.signature = sig;
-              const f = signatureFinding(sig, item.rel, item.depth === 0 || inventory.filter((x) => x.type.kind === 'pe').length === 1);
+              const f = signatureFinding(sig, item.rel, item.depth === 0 || peCount === 1);
               if (f) findings.push(f);
               if (sig.status === 'Valid') {
                 signedFiles.add(item.rel);
@@ -280,20 +318,7 @@ export async function scanFile(inputPath, options = {}) {
       }
 
       if (kind === 'script' || kind === 'json' || kind === 'text') {
-        const res = await guard(`Script analysis failed for ${item.rel}`, async () => {
-          const { buf, truncated } = await readCapped(item.abs, LIMITS.maxScriptBytes);
-          const text = buf.toString('utf8');
-          const ext = item.type.ext;
-          const lang = kind === 'text' ? 'other' : scriptLang(ext);
-          const shape = scriptShape(text);
-          summary.script = { lang, lines: shape.lines, minified: shape.minified, truncated };
-          const ctx = { electron: electronApp || looksLikeElectron(text) };
-          pushScriptHits(findings, scanScript(text, lang, ctx), item.rel);
-          findings.push(...iocFindings(scanIocs(text), item.rel));
-          if (['.jse', '.vbe'].includes(ext) || /#@~\^/.test(text.slice(0, 4096))) {
-            findings.push(mk('script.encoded-file', 'obfuscation', 'high', 'Encoded Windows script file', 'JSE / VBE files are encoded with the Microsoft Script Encoder; legitimate software almost never ships them.', item.rel));
-          }
-        });
+        const res = await guard(`Script analysis failed for ${item.rel}`, () => analyzeText(item, summary, kind));
         if (!res.ok) errors.push(res.error);
         continue;
       }
@@ -352,7 +377,7 @@ export async function scanFile(inputPath, options = {}) {
             findings.push(mk('vba.autoexec-dropper', 'execution', 'critical', 'Auto-executing macro that runs or downloads code', 'The macro starts automatically and executes commands, downloads content or calls Windows APIs: the standard malicious-document pattern.', item.rel));
           }
         }
-        if (item.hashes && item.hashes.entropy > 7.6 && item.type.size > 64 * 1024 && kind === 'binary') {
+        if (item.hashes && item.hashes.entropy > 7.6 && item.type.size > 64 * 1024 && item.type.kind === 'binary') {
           findings.push(mk('obfuscation.encrypted-blob', 'obfuscation', 'low', 'High-entropy data blob', `Entropy ${item.hashes.entropy.toFixed(2)} bits/byte: the file is compressed or encrypted (possibly an encrypted payload).`, item.rel));
         }
         if (reaAvailable && (kind === 'elf' || kind === 'macho')) {
@@ -367,8 +392,9 @@ export async function scanFile(inputPath, options = {}) {
     if (reaAvailable && opts.deep) {
       for (const item of inventory.filter((x) => x.type.kind === 'asar')) {
         progress('rea', `REA: reconstructing JavaScript application ${item.rel}`, 86);
-        const runs = await reaInspect(item.abs, 'asar', { deep: true, workDir: sandbox.dir });
-        for (const r of runs) reaRuns.push(reaRecord(r, item.rel));
+        const res = await guard(`REA JavaScript reconstruction failed for ${item.rel}`, () => reaInspect(item.abs, 'asar', { deep: true, workDir: sandbox.dir }));
+        if (!res.ok) errors.push(res.error);
+        else for (const r of res.value) reaRuns.push(reaRecord(r, item.rel));
       }
     }
 
@@ -388,8 +414,11 @@ export async function scanFile(inputPath, options = {}) {
       const capabilityOnly = f.ruleId.startsWith('combo.') || f.ruleId.startsWith('imports.');
       if (f.severity === 'critical' && !capabilityOnly) continue;
       const steps = capabilityOnly && f.ruleId.startsWith('combo.') ? 2 : 1;
-      f.severity = SEVERITIES[Math.max(1, SEVERITIES.indexOf(f.severity) - steps)];
-      f.description += ' (Severity lowered one level: the file carries a valid Authenticode signature.)';
+      const from = SEVERITIES.indexOf(f.severity);
+      const to = Math.max(1, from - steps);
+      if (to >= from) continue; // already at the floor ("low"): nothing was lowered
+      f.severity = SEVERITIES[to];
+      f.description += ` (Severity lowered ${from - to === 1 ? 'one level' : `${from - to} levels`}: the file carries a valid Authenticode signature.)`;
       f.signedDowngrade = true;
     }
     const coverage = assessCoverage(inventory, findings);
@@ -426,7 +455,7 @@ export async function scanFile(inputPath, options = {}) {
       categories: CATEGORIES,
       findings: deduped.map((f, idx) => ({ ...f, id: `F${String(idx + 1).padStart(3, '0')}` })),
       files: fileSummaries,
-      archive: { extractedFiles: inventory.length - 1, warnings: archiveWarnings.slice(0, 500) },
+      archive: { extractedFiles: inventory.filter((it) => it.depth > 0).length, warnings: archiveWarnings.slice(0, 500) },
       rea: {
         available: reaAvailable,
         source: reaLoc.source,
@@ -647,8 +676,7 @@ async function carvePe(item, dest, sandbox, findings) {
         const data = Buffer.alloc(size);
         await fh.read(data, 0, size, pe.overlay.offset);
         const target = sandbox.safeJoin(dest, `overlay.${hit[1]}`);
-        await sandbox.writeBuffer(target, data);
-        children.push({ abs: target, name: `[overlay].${hit[1]}` });
+        children.push({ abs: await sandbox.writeBuffer(target, data), name: `[overlay].${hit[1]}` });
       } finally {
         await fh.close();
       }
@@ -673,8 +701,7 @@ async function carvePe(item, dest, sandbox, findings) {
         if (end >= 1024 && pos + end <= buf.length) {
           offsets.push(pos);
           const target = sandbox.safeJoin(dest, `embedded-0x${pos.toString(16)}.${sub.isDll ? 'dll' : 'exe'}`);
-          await sandbox.writeBuffer(target, buf.subarray(pos, pos + end));
-          children.push({ abs: target, name: `[embedded-pe@0x${pos.toString(16)}].${sub.isDll ? 'dll' : 'exe'}` });
+          children.push({ abs: await sandbox.writeBuffer(target, buf.subarray(pos, pos + end)), name: `[embedded-pe@0x${pos.toString(16)}].${sub.isDll ? 'dll' : 'exe'}` });
           pos = buf.indexOf('MZ', pos + end);
           continue;
         }
@@ -699,8 +726,7 @@ async function carvePdf(item, dest, sandbox) {
   for (const [i, e] of pdf.embedded.entries()) {
     const target = sandbox.safeJoin(dest, `${i + 1}-${e.name}`);
     if (!target) continue;
-    await sandbox.writeBuffer(target, e.data);
-    children.push({ abs: target, name: `[attachment]/${e.name}` });
+    children.push({ abs: await sandbox.writeBuffer(target, e.data), name: `[attachment]/${e.name}` });
   }
   item.pdf = { ...pdf, embedded: pdf.embedded.map((e) => ({ name: e.name, size: e.data.length })) };
   return { children, warnings: [] };
@@ -929,12 +955,15 @@ function apiFindings(imports, corpus, file) {
     });
   }
   for (const combo of API_COMBOS) {
-    if (combo.all.every((group) => group.some((name) => imported.has(name)))) {
+    const present = combo.all.map((group) => group.filter((name) => imported.has(name)));
+    // Every step needs an API, and the steps need different APIs: an API listed in two
+    // groups (GetAsyncKeyState in the keylogger combination) must not satisfy both alone.
+    if (present.every((group) => group.length > 0) && distinctPick(present)) {
       out.push({
         ...mk(combo.id, combo.category, combo.severity, combo.title, `${combo.description} (MITRE ATT&CK ${combo.mitre})`, file),
         category: 'imports',
         mitre: combo.mitre,
-        evidence: combo.all.map((group) => group.filter((n) => imported.has(n)).join(' / ')),
+        evidence: present.map((group) => group.join(' / ')),
       });
     }
   }
@@ -947,6 +976,18 @@ function apiFindings(imports, corpus, file) {
     out.push({ ...mk('imports.dynamic-resolution', 'imports', dynamic.length >= 4 ? 'high' : 'medium', 'Sensitive APIs resolved dynamically', 'These API names appear as strings but are not in the import table, so they are probably resolved with GetProcAddress to hide them from static scanners.', file), evidence: dynamic });
   }
   return out;
+}
+
+/** Can one different name be chosen from every group? (Groups are tiny: plain backtracking.) */
+function distinctPick(groups, used = new Set(), i = 0) {
+  if (i === groups.length) return true;
+  for (const name of groups[i]) {
+    if (used.has(name)) continue;
+    used.add(name);
+    if (distinctPick(groups, used, i + 1)) return true;
+    used.delete(name);
+  }
+  return false;
 }
 
 function iocFindings(results, file) {

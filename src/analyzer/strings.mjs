@@ -19,6 +19,42 @@ export async function readCapped(filePath, max) {
 }
 
 /**
+ * Which text encoding a buffer uses: by byte-order mark, otherwise by the NUL pattern
+ * of BOM-less UTF-16 (ASCII-range text has a NUL in every second byte).
+ * @returns {{encoding: 'utf8'|'utf16le'|'utf16be', bom: number}}
+ */
+export function sniffTextEncoding(buf) {
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return { encoding: 'utf16le', bom: 2 };
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) return { encoding: 'utf16be', bom: 2 };
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return { encoding: 'utf8', bom: 3 };
+  const n = Math.min(buf.length, 4096) & ~1;
+  if (n >= 8) {
+    let evenNul = 0;
+    let oddNul = 0;
+    for (let i = 0; i < n; i += 2) {
+      if (buf[i] === 0) evenNul += 1;
+      if (buf[i + 1] === 0) oddNul += 1;
+    }
+    const pairs = n / 2;
+    if (oddNul > pairs * 0.6 && evenNul < pairs * 0.05) return { encoding: 'utf16le', bom: 0 };
+    if (evenNul > pairs * 0.6 && oddNul < pairs * 0.05) return { encoding: 'utf16be', bom: 0 };
+  }
+  return { encoding: 'utf8', bom: 0 };
+}
+
+/**
+ * Decode a text file. UTF-16 (with or without a BOM) is decoded properly: read as UTF-8
+ * it would be letters separated by NUL bytes, which no script or IoC rule can match.
+ */
+export function decodeText(buf) {
+  const { encoding, bom } = sniffTextEncoding(buf);
+  if (encoding === 'utf8') return buf.toString('utf8', bom);
+  const end = bom + ((buf.length - bom) & ~1);
+  if (encoding === 'utf16le') return buf.toString('utf16le', bom, end);
+  return Buffer.from(buf.subarray(bom, end)).swap16().toString('utf16le');
+}
+
+/**
  * Extract printable ASCII and UTF-16LE strings.
  * @returns {{ascii: string[], unicode: string[], total: number}}
  */

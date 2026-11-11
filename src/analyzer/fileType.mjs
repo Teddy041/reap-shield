@@ -5,6 +5,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { PE_EXTENSIONS, SCRIPT_EXTENSIONS } from './config.mjs';
+import { decodeText, sniffTextEncoding } from './strings.mjs';
 
 /**
  * @typedef {'pe'|'elf'|'macho'|'zip'|'rar'|'tar'|'gzip'|'asar'|'7z'|'script'|'json'|'text'|'binary'|'empty'} FileKind
@@ -24,12 +25,37 @@ async function readHead(filePath, n = 1024) {
 
 function looksLikeText(buf) {
   if (buf.length === 0) return false;
+  if (sniffTextEncoding(buf).encoding !== 'utf8') {
+    // UTF-16: judge the decoded characters, not the NUL-padded bytes.
+    const text = decodeText(buf);
+    if (text.length === 0) return false;
+    let ok = 0;
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c === 9 || c === 10 || c === 13 || (c >= 32 && c !== 0x7f && c !== 0xfffd)) ok += 1;
+    }
+    return ok / text.length > 0.95;
+  }
   let printable = 0;
   for (const b of buf) {
     if (b === 0) return false;
     if (b === 9 || b === 10 || b === 13 || (b >= 32 && b < 127) || b >= 128) printable += 1;
   }
   return printable / buf.length > 0.95;
+}
+
+/**
+ * True when the first 4 KiB of a file read as text (any magic bytes at the start included).
+ * Stricter than looksLikeText: it decides whether a file that claims to be an archive or an
+ * executable is really a script, so bytes above 0x7f do not count as printable here.
+ */
+export async function headLooksTextual(filePath) {
+  const head = await readHead(filePath, 4096);
+  if (!looksLikeText(head)) return false;
+  if (sniffTextEncoding(head).encoding !== 'utf8') return true;
+  let ascii = 0;
+  for (const b of head) if (b === 9 || b === 10 || b === 13 || (b >= 32 && b < 127)) ascii += 1;
+  return ascii / head.length > 0.85;
 }
 
 /** Validate the ASAR pickle header layout: [4][headerSize][payloadSize][jsonLen]{json */
@@ -86,7 +112,8 @@ export async function detectFileType(filePath) {
   if (hex(8) === 'd0cf11e0a1b11ae1') return kind('ole', oleLabel(ext));
   if (head.toString('latin1', 0, 4) === 'ITSF') return kind('chm', 'Compiled HTML Help (CHM)');
   if (head.toString('latin1', 0, 8) === 'MSWIM\0\0\0') return kind('wim', 'Windows Imaging (WIM) archive');
-  if (head.toString('latin1', 2, 5) === '-lh' || head.toString('latin1', 2, 5) === '-lz') return kind('lzh', 'LZH/LHA archive');
+  // LHA method id at offset 2: "-lh0-" .. "-lh7-", "-lhd-", "-lzs-", "-lz4-", "-lz5-".
+  if (/^-l[hz][0-9a-z]-$/.test(head.toString('latin1', 2, 7))) return kind('lzh', 'LZH/LHA archive');
   if (head[0] === 0x60 && head[1] === 0xea) return kind('arj', 'ARJ archive');
   if (/^07070[127]/.test(head.toString('latin1', 0, 6))) return kind('cpio', 'CPIO archive');
   if (head.toString('latin1', 0, 8) === 'conectix' || head.toString('latin1', 0, 8) === 'vhdxfile') return kind('vhd', 'Virtual hard disk (VHD/VHDX)');

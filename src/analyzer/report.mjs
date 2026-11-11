@@ -16,8 +16,11 @@ const esc = (s) =>
 /** Markdown-safe inline code (backticks cannot break out). */
 const mdCode = (s) => {
   const str = String(s ?? '').replace(/\r?\n/g, ' ');
-  const fence = str.includes('`') ? '``' : '`';
-  return `${fence}${str.includes('`') ? ` ${str} ` : str}${fence}`;
+  if (str.trim() === '') return 'n/a'; // an empty code span renders as two literal backticks
+  // The fence must be longer than the longest backtick run inside the text.
+  const longest = Math.max(0, ...(str.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longest + 1);
+  return longest > 0 ? `${fence} ${str} ${fence}` : `${fence}${str}${fence}`;
 };
 const mdText = (s) => String(s ?? '').replace(/([\\*_[\]<>|#])/g, '\\$1').replace(/\r?\n/g, ' ');
 

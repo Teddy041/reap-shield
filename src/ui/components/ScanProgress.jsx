@@ -15,7 +15,8 @@ export default function ScanProgress({ fileName, progress, log, onCancel }) {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
-  const currentIdx = STAGES.findIndex(([s]) => s === progress.stage);
+  // "done" is not a column of its own: every stage is complete at that point.
+  const currentIdx = progress.stage === 'done' ? STAGES.length : STAGES.findIndex(([s]) => s === progress.stage);
 
   return (
     <div className="scanline rounded-2xl border border-edge bg-panel p-6 glow">
@@ -39,7 +40,7 @@ export default function ScanProgress({ fileName, progress, log, onCancel }) {
         <span className="font-mono">{progress.percent}%</span>
       </div>
 
-      <ol className="mt-6 grid grid-cols-6 gap-2">
+      <ol className="mt-6 grid grid-cols-7 gap-2">
         {STAGES.map(([id, label], i) => {
           const state = i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'todo';
           return (

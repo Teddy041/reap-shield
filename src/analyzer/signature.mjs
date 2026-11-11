@@ -50,6 +50,8 @@ export async function verifyAuthenticodeMany(filePaths, chunkSize = 150) {
       const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', BATCH_SCRIPT], { windowsHide: true });
       let stdout = '';
       const timer = setTimeout(() => child.kill(), 30000 + chunk.length * 2000);
+      // Decode as a stream so a signer name with non-ASCII characters split across chunks stays intact.
+      child.stdout.setEncoding('utf8');
       child.stdout.on('data', (d) => (stdout += d));
       child.on('error', () => resolve([]));
       child.on('close', () => {

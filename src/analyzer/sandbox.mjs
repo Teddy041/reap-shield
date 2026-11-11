@@ -59,7 +59,8 @@ export class Sandbox {
       if (part === '..') return null;
       // Windows-reserved characters and device names would misbehave on NTFS.
       const cleaned = part.replace(/[<>:"|?*\x00-\x1f]/g, '_');
-      const stem = cleaned.split('.')[0].toUpperCase();
+      // Windows ignores trailing spaces when it resolves device names ("NUL .txt").
+      const stem = cleaned.split('.')[0].trim().toUpperCase();
       parts.push(/^(CON|PRN|AUX|NUL|COM\d|LPT\d)$/.test(stem) ? `_${cleaned}` : cleaned);
     }
     if (parts.length === 0) return null;
@@ -94,18 +95,26 @@ export class Sandbox {
     }
   }
 
-  /** Write a buffer to a safe path inside the sandbox. */
+  /**
+   * Write a buffer to a safe path inside the sandbox.
+   * Returns the path that was actually written: when `target` already exists (duplicate
+   * entry names, or names that differ only by case on Windows) the data goes to a
+   * unique sibling name, so both versions are kept and analyzed.
+   * @returns {Promise<string>}
+   */
   async writeBuffer(target, data) {
     this.reserve(data.byteLength);
     await fs.mkdir(path.dirname(target), { recursive: true });
     // 0o600: owner read/write only, never executable.
-    await fs.writeFile(target, data, { mode: 0o600, flag: 'wx' }).catch(async (err) => {
-      if (err.code === 'EEXIST') {
-        await fs.writeFile(uniqueName(target), data, { mode: 0o600, flag: 'wx' });
-      } else {
-        throw err;
-      }
-    });
+    try {
+      await fs.writeFile(target, data, { mode: 0o600, flag: 'wx' });
+      return target;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      const alt = uniqueName(target);
+      await fs.writeFile(alt, data, { mode: 0o600, flag: 'wx' });
+      return alt;
+    }
   }
 
   /** Remove the scan directory. Never throws. */
@@ -158,7 +167,7 @@ export async function removeSandboxDir(dir, root = DEFAULT_SANDBOX_ROOT) {
   return true;
 }
 
-function uniqueName(target) {
+export function uniqueName(target) {
   const ext = path.extname(target);
   return `${target.slice(0, target.length - ext.length)}.${crypto.randomBytes(3).toString('hex')}${ext}`;
 }

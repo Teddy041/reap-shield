@@ -139,13 +139,20 @@ export function runRea(args, opts = {}) {
     }, opts.timeoutMs ?? LIMITS.reaTimeoutMs);
 
     const maxCapture = 64 * 1024 * 1024;
+    /** Resolves once everything REA printed is on disk (stdoutFile mode only). */
+    let flushed = Promise.resolve();
     if (opts.stdoutFile) {
-      child.stdout.pipe(fs.createWriteStream(opts.stdoutFile));
+      const sink = fs.createWriteStream(opts.stdoutFile);
+      flushed = new Promise((res) => sink.once('close', res).once('error', res));
+      child.stdout.pipe(sink);
     } else {
+      // Decode as a stream: a multi-byte character split across two chunks stays intact.
+      child.stdout.setEncoding('utf8');
       child.stdout.on('data', (d) => {
         if (stdout.length < maxCapture) stdout += d;
       });
     }
+    child.stderr.setEncoding('utf8');
     child.stderr.on('data', (d) => {
       if (stderr.length < 64 * 1024) stderr += d;
     });
@@ -156,16 +163,20 @@ export function runRea(args, opts = {}) {
     child.on('close', (code) => {
       clearTimeout(timer);
       if (opts.stdoutFile) {
-        if (code === 0) {
-          done({ ok: true, stdoutFile: opts.stdoutFile });
-          return;
-        }
-        // Failures are small JSON error documents written to stdout.
-        fsp
-          .readFile(opts.stdoutFile, 'utf8')
-          .then((text) => extractError(JSON.parse(text)))
-          .catch(() => undefined)
-          .then((msg) => done({ ok: false, stdoutFile: opts.stdoutFile, error: msg || lastNonProgressLine(stderr) || `exit code ${code}` }));
+        // The process can exit before the file stream has written its last chunk; the
+        // evidence file is read by the next REA command, so wait until it is complete.
+        flushed.then(() => {
+          if (code === 0) {
+            done({ ok: true, stdoutFile: opts.stdoutFile });
+            return;
+          }
+          // Failures are small JSON error documents written to stdout.
+          fsp
+            .readFile(opts.stdoutFile, 'utf8')
+            .then((text) => extractError(JSON.parse(text)))
+            .catch(() => undefined)
+            .then((msg) => done({ ok: false, stdoutFile: opts.stdoutFile, error: msg || lastNonProgressLine(stderr) || `exit code ${code}` }));
+        });
         return;
       }
       let json;
